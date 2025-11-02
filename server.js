@@ -25,10 +25,16 @@ const app = express();
 
 // CORS configuration - QUAN TRỌNG
 app.use(cors({
-  origin: ["https://onepasscms.vercel.app", "http://localhost:5173", "http://localhost:8080"],
+  origin: [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:8080",
+    "https://onepasscms.vercel.app" 
+  ],
   methods: ["GET", "POST", "PUT", "DELETE"],
   credentials: true
 }));
+
 
 app.use(bodyParser.json());
 
@@ -51,11 +57,16 @@ const server = http.createServer(app);
 // Socket.io configuration - SỬA LẠI
 const io = new Server(server, {
   cors: {
-    origin: ["https://onepasscms.vercel.app", "http://localhost:5173", "http://localhost:8080"],
+    origin: [
+      "http://localhost:3000",
+      "http://localhost:5173",
+      "http://localhost:8080",
+      "https://onepasscms.vercel.app"
+    ],
     methods: ["GET", "POST"],
     credentials: true
   },
-  transports: ['websocket', 'polling'] // Thêm transports để đảm bảo kết nối
+  transports: ['websocket', 'polling']
 });
 
 // Socket.io connection handler
