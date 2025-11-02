@@ -99,6 +99,26 @@ app.get("/api/User", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+// DELETE YeuCau
+app.delete("/api/yeucau/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log("🗑️ Xóa yêu cầu ID:", id);
+
+    const { error } = await supabase
+      .from("YeuCau")
+      .delete()
+      .eq("YeuCauID", id);
+
+    if (error) throw error;
+
+    console.log("✅ Đã xóa yêu cầu", id);
+    res.json({ success: true, message: "Đã xóa yêu cầu" });
+  } catch (err) {
+    console.error("❌ Lỗi khi xóa yêu cầu:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 // UPDATE YeuCau
 app.put("/api/yeucau/:id", async (req, res) => {
