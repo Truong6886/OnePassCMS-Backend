@@ -1,25 +1,23 @@
-import dotenv from 'dotenv';
 import express from "express";
 import cors from "cors";
 import bodyParser from "body-parser";
 import { createClient } from "@supabase/supabase-js";
 import multer from "multer";
 import bcrypt from "bcryptjs";
-import { resolve } from "path";
-// ==== SOCKET.IO Setup ====
 import http from "http";
 import { Server } from "socket.io";
+import dotenv from "dotenv";
 
-// ==== Load ENV ====
-dotenv.config({ path: resolve("./.env") });
+// ==== Load biến môi trường (.env) ====
+dotenv.config();
 
+// ==== Lấy thông tin Supabase ====
 const { SUPABASE_URL, SUPABASE_SERVICE_KEY } = process.env;
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
-  console.error("⚠️  Chưa thiết lập SUPABASE_URL hoặc SUPABASE_SERVICE_KEY trong .env");
+  console.error("⚠️  Thiếu SUPABASE_URL hoặc SUPABASE_SERVICE_KEY trong file .env hoặc Render environment!");
   process.exit(1);
 }
-
 // ==== Init Express & Supabase ====
 const app = express();
 
