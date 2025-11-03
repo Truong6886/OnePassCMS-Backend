@@ -120,35 +120,6 @@ app.delete("/api/yeucau/:id", async (req, res) => {
   }
 });
 
-// UPDATE YeuCau
-app.put("/api/yeucau/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const updateData = req.body;
-
-    console.log("Updating YeuCau:", { id, updateData });
-
-    const { data, error } = await supabase
-      .from("YeuCau")
-      .update(updateData)
-      .eq("YeuCauID", id)
-      .select();
-
-    if (error) {
-      console.error("Supabase update error:", error);
-      throw error;
-    }
-
-    console.log("Update successful:", data);
-    res.json({ success: true, data });
-  } catch (err) {
-    console.error("Error updating YeuCau:", err);
-    res.status(500).json({ 
-      success: false, 
-      error: err.message 
-    });
-  }
-});
 
 // UPDATE User với avatar
 app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
@@ -238,11 +209,67 @@ app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
     });
   }
 });
+app.put("/api/yeucau/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    let updateData = req.body;
+
+    console.log("📝 Cập nhật yêu cầu (trước khi xử lý):", { id, updateData });
+    for (const key of Object.keys(updateData)) {
+      if (updateData[key] === "") updateData[key] = null;
+    }
+
+    // Nếu có NguoiPhuTrachId thì ép kiểu về integer, hoặc null nếu không hợp lệ
+    if (updateData.NguoiPhuTrachId !== null && updateData.NguoiPhuTrachId !== undefined) {
+      const parsed = parseInt(updateData.NguoiPhuTrachId, 10);
+      updateData.NguoiPhuTrachId = isNaN(parsed) ? null : parsed;
+    }
+
+    console.log("🧹 Dữ liệu sau khi chuẩn hóa:", updateData);
+
+    // Cập nhật trước
+    const { error: updateError } = await supabase
+      .from("YeuCau")
+      .update(updateData)
+      .eq("YeuCauID", id);
+
+    if (updateError) throw updateError;
+
+    const { data, error } = await supabase
+      .from("YeuCau")
+      .select(`
+        *,
+        NguoiPhuTrach:User!YeuCau_NguoiPhuTrachId_fkey(
+          id,
+          name,
+          username,
+          email
+        )
+      `)
+      .eq("YeuCauID", id)
+      .single();
+
+    if (error) throw error;
+
+    console.log("✅ Đã cập nhật và lấy lại dữ liệu:", data);
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error("❌ Lỗi cập nhật yêu cầu:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 
 // GET all YeuCau
 app.get("/api/yeucau", async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const { userId, is_admin } = req.query;
+
+    console.log("📥 Fetching YeuCau | userId:", userId, "| is_admin:", is_admin);
+
+    const isAdmin = is_admin === true || is_admin === "true"; 
+
+    let query = supabase
       .from("YeuCau")
       .select(`
         *,
@@ -255,9 +282,18 @@ app.get("/api/yeucau", async (req, res) => {
       `)
       .order("YeuCauID", { ascending: true });
 
+    if (!isAdmin && userId) {
+      console.log("🔒 Lọc theo NguoiPhuTrachId =", userId);
+      query = query.eq("NguoiPhuTrachId", parseInt(userId));
+    }
+
+    const { data, error } = await query;
     if (error) throw error;
+
+    console.log(`✅ Trả về ${data?.length || 0} yêu cầu`);
     res.json({ success: true, data });
   } catch (err) {
+    console.error("❌ Lỗi khi lấy danh sách YeuCau:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -410,13 +446,6 @@ app.post("/api/yeucau", async (req, res) => {
     });
   }
 });
-
-
-
-
-
-
-
 app.post("/api/login", async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ success: false, message: "Thiếu username hoặc password" });
