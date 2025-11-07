@@ -7,6 +7,10 @@ import bcrypt from "bcryptjs";
 import http from "http";
 import { Server } from "socket.io";
 import dotenv from "dotenv";
+import { PDFDocument, rgb } from "pdf-lib";
+import fetch from "node-fetch";
+
+// ✅ Tạo vùng ký cho PDF có sẵn
 
 // ==== Load biến môi trường (.env) ====
 dotenv.config();
@@ -25,6 +29,7 @@ const app = express();
 app.use(cors({
   origin: [
     "http://localhost:3000",
+    "http://localhost:5173",
     "https://onepass-gamma.vercel.app",
     "http://localhost:8080",
     "https://onepasscms.vercel.app" 
@@ -79,6 +84,157 @@ io.on("connection", (socket) => {
     console.error("Socket error:", error);
   });
 });
+app.post("/api/add-signature-field", async (req, res) => {
+  try {
+    const { pdfUrl, mahoso } = req.body;
+    if (!pdfUrl || !mahoso)
+      return res.status(400).json({ success: false, message: "Thiếu pdfUrl hoặc mahoso" });
+
+    // 🧩 1️⃣ Tải PDF gốc
+    const pdfBytes = await fetch(pdfUrl).then((r) => r.arrayBuffer());
+    const pdfDoc = await PDFDocument.load(pdfBytes);
+    const page = pdfDoc.getPages()[pdfDoc.getPageCount() - 1];
+
+    // 🧩 2️⃣ Thêm 1 vùng ký CHO KHÁCH HÀNG (vẽ khung highlight)
+    const highlightColor = rgb(1, 1, 0); // vàng
+    const borderWidth = 1;
+
+    // Vùng ký khách hàng
+    page.drawRectangle({
+      x: 330,
+      y: 150,
+      width: 200,
+      height: 50,
+      borderColor: rgb(0, 0, 1),
+      color: rgb(1, 1, 0),
+      opacity: 0.3,
+      borderWidth,
+    });
+
+    page.drawText("Ký tên (Khách hàng)", { x: 340, y: 170, size: 10, color: rgb(0, 0, 0) });
+
+    // 🧩 3️⃣ Lưu lại
+    const modifiedBytes = await pdfDoc.save();
+    const fileName = `signed_area_${Date.now()}.pdf`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("pdfs")
+      .upload(fileName, Buffer.from(modifiedBytes), {
+        contentType: "application/pdf",
+        upsert: true,
+      });
+    if (uploadError) throw uploadError;
+
+    const { data: publicUrlData } = supabase.storage
+      .from("pdfs")
+      .getPublicUrl(fileName);
+
+    // 🧩 4️⃣ Lưu vùng ký vào DB (CHỈ 1 VÙNG CHO KHÁCH HÀNG)
+    await supabase.from("signatureareas").upsert([
+      { 
+        MaHoSo: mahoso, 
+        label: "Khách hàng", 
+        x: 330, 
+        y: 150, 
+        width: 200, 
+        height: 50, 
+        pageIndex: 1 
+      }
+    ]);
+
+    res.json({
+      success: true,
+      message: "Đã thêm vùng ký cho khách hàng",
+      pdfUrl: publicUrlData.publicUrl,
+    });
+  } catch (err) {
+    console.error("❌ Lỗi tạo vùng ký:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+// ✅ JOIN PdfChuaKy và SignatureAreas theo MaHoSo
+app.get("/api/pdf-signature/:mahoso", async (req, res) => {
+  try {
+    const { mahoso } = req.params;
+
+    // Lấy PDF chưa ký
+    const { data: pdfData, error: pdfError } = await supabase
+      .from("PdfChuaKy")
+      .select("MaHoSo, PdfUrl, NgayTao")
+      .eq("MaHoSo", mahoso)
+      .maybeSingle();
+    if (pdfError) throw pdfError;
+
+    // Lấy danh sách vùng ký
+    const { data: areasData, error: areaError } = await supabase
+      .from("signatureareas")
+      .select("*")
+      .eq("MaHoSo", mahoso);
+    if (areaError) throw areaError;
+
+    if (!pdfData) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy PDF cho hồ sơ này" });
+    }
+
+    res.json({
+      success: true,
+      mahoso,
+      pdf: pdfData,
+      signatureAreas: areasData || [],
+    });
+  } catch (err) {
+    console.error("❌ Lỗi khi JOIN PDF và vùng ký:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.post("/api/sign-pdf", async (req, res) => {
+  try {
+    const { pdfUrl, signatureData, MaHoSo, areaId } = req.body;
+    if (!pdfUrl || !signatureData || !MaHoSo || !areaId)
+      return res.status(400).json({ success: false, message: "Thiếu dữ liệu hoặc id vùng ký" });
+
+    const pdfBytes = await fetch(pdfUrl).then((r) => r.arrayBuffer());
+    const pdfDoc = await PDFDocument.load(pdfBytes);
+
+    const { data: area } = await supabase
+      .from("signatureareas")
+      .select("*")
+      .eq("id", areaId)
+      .maybeSingle();
+
+    if (!area) throw new Error("Không tìm thấy vùng ký!");
+
+    const page = pdfDoc.getPages()[area.pageIndex - 1];
+    const imageBytes = Buffer.from(signatureData.split(",")[1], "base64");
+    const pngImage = await pdfDoc.embedPng(imageBytes);
+
+    const scale = 0.7;
+    page.drawImage(pngImage, {
+      x: Number(area.x) + 10,
+      y: Number(area.y) + 5,
+      width: Number(area.width) * scale,
+      height: Number(area.height) * scale,
+    });
+
+    const signedBytes = await pdfDoc.save();
+    const fileName = `signed_${MaHoSo}_${Date.now()}.pdf`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("pdfs")
+      .upload(fileName, Buffer.from(signedBytes), {
+        contentType: "application/pdf",
+        upsert: true,
+      });
+    if (uploadError) throw uploadError;
+
+    const { data: publicUrlData } = supabase.storage.from("pdfs").getPublicUrl(fileName);
+    res.json({ success: true, pdfUrl: publicUrlData.publicUrl });
+  } catch (err) {
+    console.error("❌ Lỗi ký PDF:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 // Make io accessible to routes - SỬA LẠI: Tạo biến toàn cục
 app.set("socketio", io);
@@ -91,7 +247,7 @@ app.get("/api/User", async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("User")
-      .select("id, name, username, email, role, is_admin, avatar")
+      .select("id, name, username, email, is_admin, is_accountant, is_director, avatar")
       .order("id", { ascending: true });
     handleSupabaseError(error);
     res.json({ success: true, data });
@@ -119,6 +275,116 @@ app.delete("/api/yeucau/:id", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+// =================== Upload PDF và tạo vùng ký cho khách hàng ===================
+app.post("/api/upload-pdf", upload.single("pdf"), async (req, res) => {
+  try {
+    const { MaHoSo } = req.body;
+    if (!req.file || !MaHoSo)
+      return res.status(400).json({ success: false, message: "Thiếu file hoặc MaHoSo" });
+
+    // 1) Upload PDF gốc lên Supabase
+    const fileExt = req.file.originalname.split(".").pop();
+    const fileName = `yeucau_${MaHoSo}_${Date.now()}.${fileExt}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("pdfs")
+      .upload(fileName, req.file.buffer, {
+        contentType: "application/pdf",
+        upsert: true,
+      });
+    if (uploadError) throw uploadError;
+
+    const { data: publicUrlData } = supabase.storage.from("pdfs").getPublicUrl(fileName);
+    const originalPdfUrl = publicUrlData.publicUrl;
+
+    // 2) Tải PDF vừa upload, mở bằng pdf-lib
+    const pdfBytes = await fetch(originalPdfUrl).then((r) => r.arrayBuffer());
+    const pdfDoc = await PDFDocument.load(pdfBytes);
+    const totalPages = pdfDoc.getPageCount();
+
+    // 3) Tạo vùng ký CHỈ CHO KHÁCH HÀNG (1 vùng duy nhất)
+    const pageIndexForSignature = Math.max(1, totalPages); // trang cuối
+
+    const page = pdfDoc.getPages()[pageIndexForSignature - 1];
+
+    // Vùng ký khách hàng (tọa độ mẫu - có thể điều chỉnh)
+    const customerArea = { 
+      x: 320, 
+      y: 140, 
+      width: 200, 
+      height: 50, 
+      pageIndex: pageIndexForSignature, 
+      label: "Khách hàng" 
+    };
+    
+    // Vẽ khung highlight cho vùng ký khách hàng
+    page.drawRectangle({
+      x: customerArea.x,
+      y: customerArea.y,
+      width: customerArea.width,
+      height: customerArea.height,
+      color: rgb(1, 1, 0), // nền vàng
+      opacity: 0.25,
+      borderColor: rgb(0, 0, 1),
+      borderWidth: 1,
+    });
+    page.drawText("Ký tên (Khách hàng)", {
+      x: customerArea.x + 6,
+      y: customerArea.y + customerArea.height - 14,
+      size: 10,
+      color: rgb(0, 0, 0),
+    });
+
+    // 4) Lưu PDF mới (có highlight vùng ký) và upload lại lên Supabase
+    const modifiedBytes = await pdfDoc.save();
+    const fileWithFields = `template_${MaHoSo}_${Date.now()}.pdf`;
+    const { error: reuploadError } = await supabase.storage
+      .from("pdfs")
+      .upload(fileWithFields, Buffer.from(modifiedBytes), {
+        contentType: "application/pdf",
+        upsert: true,
+      });
+    if (reuploadError) throw reuploadError;
+
+    const { data: publicWithFields } = supabase.storage.from("pdfs").getPublicUrl(fileWithFields);
+    const finalPdfUrl = publicWithFields.publicUrl;
+
+    // 5) Lưu link PDF chưa ký vào bảng PdfChuaKy
+    await supabase.from("PdfChuaKy").upsert(
+      { MaHoSo, PdfUrl: finalPdfUrl, NgayTao: new Date().toISOString() },
+      { onConflict: "MaHoSo" }
+    );
+
+    // 6) Lưu tọa độ vùng ký vào bảng SignatureAreas (CHỈ 1 VÙNG CHO KHÁCH HÀNG)
+    const signatureRows = [
+      {
+        "MaHoSo": MaHoSo, 
+        label: customerArea.label, 
+        x: customerArea.x, 
+        y: customerArea.y, 
+        width: customerArea.width, 
+        height: customerArea.height, 
+        pageIndex: customerArea.pageIndex 
+      }
+    ];
+    
+    const { error: insertError } = await supabase.from("signatureareas").insert(signatureRows);
+    if (insertError) {
+      console.warn("⚠️ Không thể lưu signatureareas:", insertError);
+    }
+
+    // 7) Trả về url đã tạo
+    res.json({
+      success: true,
+      message: "Upload PDF thành công và đã tạo vùng ký cho khách hàng.",
+      url: finalPdfUrl,
+    });
+  } catch (err) {
+    console.error("❌ Lỗi upload PDF:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 
 
 // UPDATE User với avatar
@@ -186,7 +452,7 @@ app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
       .from("User")
       .update(updateData)
       .eq("id", id)
-      .select("id, username, email, avatar, role, is_admin, name");
+      .select("id, username, email, avatar, is_admin, is_accountant, is_director, name");
 
     if (error) {
       console.error("Supabase database update error:", error);
@@ -209,6 +475,65 @@ app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
     });
   }
 });
+// ======================== PDF CHƯA KÝ =========================
+
+// ✅ Lưu hoặc cập nhật link PDF chưa ký
+app.post("/api/pdf-chuaky", async (req, res) => {
+  try {
+    const { MaHoSo, PdfUrl } = req.body;
+    if (!MaHoSo || !PdfUrl)
+      return res.status(400).json({ success: false, message: "Thiếu MaHoSo hoặc PdfUrl" });
+
+    const { data, error } = await supabase
+      .from("PdfChuaKy")
+      .upsert(
+        { MaHoSo, PdfUrl, NgayTao: new Date().toISOString() },
+        { onConflict: "MaHoSo" }
+      )
+      .select();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error("❌ Lỗi lưu PDF:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.get("/api/pdf-chuaky/:mahoso", async (req, res) => {
+  try {
+    const { mahoso } = req.params;
+    const { data, error } = await supabase
+      .from("PdfChuaKy")
+      .select("*")
+      .eq("MaHoSo", mahoso)
+      .maybeSingle();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error("❌ Lỗi lấy PDF:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
+// ✅ Lấy link PDF chưa ký theo mã hồ sơ
+app.get("/api/signature-area/:mahoso", async (req, res) => {
+  try {
+    const { mahoso } = req.params;
+    const { data, error } = await supabase
+      .from("signatureareas")
+      .select("*")
+      .eq("MaHoSo", mahoso)
+      .order("id");
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error("❌ Lỗi lấy vùng ký:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});// ✅ API: Lấy danh sách vùng ký cho 1 hồ sơ (ví dụ: 2 vùng ký)
+
+
 app.put("/api/yeucau/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -446,6 +771,49 @@ app.post("/api/yeucau", async (req, res) => {
     });
   }
 });
+// ====================== DOANH THU ======================
+app.get("/api/doanhthu", async (req, res) => {
+  try {
+    const { userId } = req.query;
+
+    // 🔍 Lấy thông tin user
+    const { data: userData, error: userError } = await supabase
+      .from("User")
+      .select("id, username, is_admin, is_accountant, is_director")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (userError) throw userError;
+    if (!userData)
+      return res.status(404).json({ success: false, message: "Không tìm thấy người dùng" });
+
+    const { is_admin, is_accountant, is_director } = userData;
+
+    // ✅ Chỉ admin, kế toán, giám đốc mới có quyền truy cập
+    if (!is_admin && !is_accountant && !is_director) {
+      return res.status(403).json({
+        success: false,
+        message: "Bạn không có quyền truy cập doanh thu"
+      });
+    }
+
+    console.log("✅ Quyền hợp lệ:", { is_admin, is_accountant, is_director });
+
+    // 👉 Truy vấn dữ liệu doanh thu
+    const { data, error } = await supabase
+      .from("DoanhThu")
+      .select("*")
+      .order("Ngay", { ascending: false });
+
+    if (error) throw error;
+
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error("❌ Lỗi khi lấy doanh thu:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 app.post("/api/login", async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ success: false, message: "Thiếu username hoặc password" });
@@ -469,8 +837,9 @@ app.post("/api/login", async (req, res) => {
       id: user.id, 
       username: user.username, 
       email: user.email, 
-      role: user.role || "user",
       is_admin: user.is_admin || false,
+      is_accountant: user.is_accountant || false,
+      is_director: user.is_director || false,
       avatar: user.avatar 
     };
 
@@ -496,7 +865,6 @@ app.post("/api/register", async (req, res) => {
         username, 
         email, 
         password_hash: hashedPassword, 
-        role,
         name: username
       }])
       .select();
