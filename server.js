@@ -588,15 +588,24 @@ app.put("/api/yeucau/:id", async (req, res) => {
 // GET all YeuCau
 app.get("/api/yeucau", async (req, res) => {
   try {
-    const { userId, is_admin } = req.query;
+    const { userId, is_admin, page = 1, limit = 20 } = req.query;
 
-    console.log("📥 Fetching YeuCau | userId:", userId, "| is_admin:", is_admin);
+    console.log("📥 Fetching YeuCau | userId:", userId, "| is_admin:", is_admin, "| page:", page, "| limit:", limit);
 
-    const isAdmin = is_admin === true || is_admin === "true"; 
 
+    const isAdmin = is_admin === true || is_admin === "true";
+
+    
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const pageLimit = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
+    const from = (pageNum - 1) * pageLimit;
+    const to = from + pageLimit - 1;
+
+    // ✅ Tạo query
     let query = supabase
       .from("YeuCau")
-      .select(`
+      .select(
+        `
         *,
         NguoiPhuTrach:User!YeuCau_NguoiPhuTrachId_fkey(
           id,
@@ -604,19 +613,36 @@ app.get("/api/yeucau", async (req, res) => {
           username,
           email
         )
-      `)
-      .order("YeuCauID", { ascending: true });
+      `,
+        { count: "exact" }
+      )
+      .order("YeuCauID", { ascending: true }) 
+      .range(from, to);
 
+    // ✅ Nếu không phải admin → lọc theo người phụ trách
     if (!isAdmin && userId) {
       console.log("🔒 Lọc theo NguoiPhuTrachId =", userId);
-      query = query.eq("NguoiPhuTrachId", parseInt(userId));
+      query = query.eq("NguoiPhuTrachId", parseInt(userId, 10));
     }
 
-    const { data, error } = await query;
+    const { data, count, error } = await query;
     if (error) throw error;
 
-    console.log(`✅ Trả về ${data?.length || 0} yêu cầu`);
-    res.json({ success: true, data });
+    const total = count ?? 0;
+    const totalPages = Math.ceil(total / pageLimit);
+
+    console.log(
+      `✅ Trả về ${data?.length || 0} yêu cầu (page ${pageNum}/${totalPages}) - total: ${total}`
+    );
+
+    res.json({
+      success: true,
+      data,
+      total,
+      totalPages,
+      currentPage: pageNum,
+      perPage: pageLimit,
+    });
   } catch (err) {
     console.error("❌ Lỗi khi lấy danh sách YeuCau:", err);
     res.status(500).json({ success: false, message: err.message });
@@ -628,6 +654,7 @@ app.post("/api/tuvan", async (req, res) => {
   try {
     const {
       TenDichVu,
+      CoSoTuVan,
       TenHinhThuc,
       HoTen,
       Email,
@@ -641,12 +668,13 @@ app.post("/api/tuvan", async (req, res) => {
 
     console.log("📨 Nhận yêu cầu tư vấn từ khách hàng:", req.body);
 
-    if (!TenDichVu || !TenHinhThuc || !HoTen || !MaVung || !SoDienThoai) {
+    if (!TenDichVu|| !HoTen || !MaVung || !SoDienThoai) {
       return res.status(400).json({ success: false, message: "Thiếu dữ liệu bắt buộc" });
     }
 
     let insertData = {
       TenDichVu,
+      CoSoTuVan: CoSoTuVan || null,
       TenHinhThuc,
       HoTen,
       MaVung,
@@ -875,7 +903,137 @@ app.post("/api/register", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+app.get("/api/fix-mahoso", async (req, res) => {
+  try {
+    const { data: yeuCauList, error } = await supabase.from("YeuCau").select("*");
+    if (error) throw error;
 
+    // ✅ Bảng mã viết tắt tiếng Việt
+    const serviceCodeMap = {
+      "Chứng thực": "CT",
+      "Kết hôn": "KH",
+      "Khai sinh, khai tử": "KS",
+      "Xuất nhập cảnh": "XNC",
+      "Giấy tờ tuỳ thân": "GT",
+      "Nhận nuôi": "NN",
+      "Thị thực": "TT",
+      "Tư vấn pháp lý": "TV",
+      "Dịch vụ B2B": "B2B",
+      "Khác": "KHAC",
+    };
+
+    // ✅ Dịch tiếng Hàn sang tiếng Việt
+    const translateServiceName = (name) => {
+      const map = {
+        "인증 센터": "Chứng thực",
+        "결혼 이민": "Kết hôn",
+        "출생신고 대행": "Khai sinh, khai tử",
+        "출입국 행정 대행": "Xuất nhập cảnh",
+        "신분증명 서류 대행": "Giấy tờ tuỳ thân",
+        "입양 절차 대행": "Nhận nuôi",
+        "비자 대행": "Thị thực",
+        "법률 컨설팅": "Tư vấn pháp lý",
+        "B2B 서비스": "Dịch vụ B2B",
+        "기타": "Khác",
+      };
+      return map[name?.trim()] || name?.trim() || "";
+    };
+
+    const updates = [];
+    let skipped = 0;
+
+    for (const record of yeuCauList) {
+      let { MaHoSo, TenDichVu, YeuCauID } = record;
+
+      if (!MaHoSo || !TenDichVu) {
+        skipped++;
+        continue;
+      }
+
+      const hasKorean = /[ㄱ-ㅎㅏ-ㅣ가-힣]/.test(MaHoSo);
+      const viName = translateServiceName(TenDichVu);
+      const prefix = serviceCodeMap[viName] || "HS";
+
+      // 🔹 Nếu không có ký tự Hàn nhưng mã sai prefix → cũng fix luôn
+      const missingPrefix = !MaHoSo.startsWith(prefix + "-");
+
+      if (hasKorean || missingPrefix) {
+        // Xóa ký tự Hàn
+        let clean = MaHoSo.replace(/[ㄱ-ㅎㅏ-ㅣ가-힣]/g, "").trim();
+
+        // Nếu thiếu dấu “-” → thêm vào giữa prefix và số
+        if (!clean.includes("-")) {
+          // Tách phần số (nếu có)
+          const numPart = clean.match(/\d+$/)?.[0] || "001";
+          clean = `${prefix}-${numPart.padStart(3, "0")}`;
+        } else if (!clean.startsWith(prefix)) {
+          clean = `${prefix}-${clean.split("-").pop().padStart(3, "0")}`;
+        }
+
+        // Nếu vẫn thiếu prefix, thêm
+        const fixed = clean.startsWith(prefix) ? clean : `${prefix}-${clean}`;
+
+        // Tránh update trùng dữ liệu
+        if (fixed !== MaHoSo) {
+          await supabase.from("YeuCau").update({ MaHoSo: fixed }).eq("YeuCauID", YeuCauID);
+          updates.push({ id: YeuCauID, old: MaHoSo, new: fixed });
+        }
+      } else {
+        skipped++;
+      }
+    }
+
+    res.json({
+      success: true,
+      updated: updates.length,
+      skipped,
+      details: updates,
+    });
+  } catch (err) {
+    console.error("❌ fix-mahoso error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
+app.post("/api/save-email", async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    // Kiểm tra đầu vào
+    if (!email || !email.includes("@")) {
+      return res.status(400).json({ success: false, message: "Email không hợp lệ" });
+    }
+
+    console.log("📨 Nhận email đăng ký:", email);
+
+    // Kiểm tra trùng lặp
+    const { data: existing, error: checkError } = await supabase
+      .from("EmailList")
+      .select("id")
+      .eq("Email", email)
+      .maybeSingle();
+
+    if (checkError) throw checkError;
+    if (existing) {
+      return res.status(200).json({ success: true, message: "Email đã tồn tại" });
+    }
+
+    // Thêm vào bảng EmailList
+    const { data, error } = await supabase
+      .from("EmailList")
+      .insert([{ Email: email, NgayTao: new Date().toISOString() }])
+      .select();
+
+    if (error) throw error;
+
+    console.log("✅ Email đã lưu:", data);
+    res.json({ success: true, message: "Đăng ký email thành công", data });
+  } catch (err) {
+    console.error("❌ Lỗi lưu email:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 app.get("/api/health", (req, res) => {
   res.json({ 
     success: true, 
