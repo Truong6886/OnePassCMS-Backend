@@ -84,75 +84,71 @@ io.on("connection", (socket) => {
     console.error("Socket error:", error);
   });
 });
-app.post("/api/add-signature-field", async (req, res) => {
+// ================= EMAIL LIST =================
+app.get("/api/email", async (req, res) => {
   try {
-    const { pdfUrl, mahoso } = req.body;
-    if (!pdfUrl || !mahoso)
-      return res.status(400).json({ success: false, message: "Thiếu pdfUrl hoặc mahoso" });
-
-    // 🧩 1️⃣ Tải PDF gốc
-    const pdfBytes = await fetch(pdfUrl).then((r) => r.arrayBuffer());
-    const pdfDoc = await PDFDocument.load(pdfBytes);
-    const page = pdfDoc.getPages()[pdfDoc.getPageCount() - 1];
-
-    // 🧩 2️⃣ Thêm 1 vùng ký CHO KHÁCH HÀNG (vẽ khung highlight)
-    const highlightColor = rgb(1, 1, 0); // vàng
-    const borderWidth = 1;
-
-    // Vùng ký khách hàng
-    page.drawRectangle({
-      x: 330,
-      y: 150,
-      width: 200,
-      height: 50,
-      borderColor: rgb(0, 0, 1),
-      color: rgb(1, 1, 0),
-      opacity: 0.3,
-      borderWidth,
-    });
-
-    page.drawText("Ký tên (Khách hàng)", { x: 340, y: 170, size: 10, color: rgb(0, 0, 0) });
-
-    // 🧩 3️⃣ Lưu lại
-    const modifiedBytes = await pdfDoc.save();
-    const fileName = `signed_area_${Date.now()}.pdf`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("pdfs")
-      .upload(fileName, Buffer.from(modifiedBytes), {
-        contentType: "application/pdf",
-        upsert: true,
-      });
-    if (uploadError) throw uploadError;
-
-    const { data: publicUrlData } = supabase.storage
-      .from("pdfs")
-      .getPublicUrl(fileName);
-
-    // 🧩 4️⃣ Lưu vùng ký vào DB (CHỈ 1 VÙNG CHO KHÁCH HÀNG)
-    await supabase.from("signatureareas").upsert([
-      { 
-        MaHoSo: mahoso, 
-        label: "Khách hàng", 
-        x: 330, 
-        y: 150, 
-        width: 200, 
-        height: 50, 
-        pageIndex: 1 
-      }
-    ]);
-
-    res.json({
-      success: true,
-      message: "Đã thêm vùng ký cho khách hàng",
-      pdfUrl: publicUrlData.publicUrl,
-    });
+    const { data, error } = await supabase
+      .from("EmailList")
+      .select("*")
+      .order("id", { ascending: true });
+    if (error) throw error;
+    res.json({ success: true, data });
   } catch (err) {
-    console.error("❌ Lỗi tạo vùng ký:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
-// ✅ JOIN PdfChuaKy và SignatureAreas theo MaHoSo
+
+// POST /api/email
+app.post("/api/email", async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, message: "Thiếu email" });
+
+    const { data, error } = await supabase
+      .from("EmailList")
+      .insert([{ Email: email, NgayTao: new Date().toISOString() }]) // 👈 sửa tên cột
+      .select();
+
+    if (error) throw error;
+    res.json({ success: true, data: data[0] });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// PUT /api/email/:id
+app.put("/api/email/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { email } = req.body;
+    const { data, error } = await supabase
+      .from("EmailList")
+      .update({ Email: email }) // 👈 sửa tên cột
+      .eq("id", id)
+      .select();
+    if (error) throw error;
+    res.json({ success: true, data: data[0] });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
+app.delete("/api/email/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { error } = await supabase
+      .from("EmailList")
+      .delete()
+      .eq("id", id);
+    if (error) throw error;
+    res.json({ success: true, message: "Đã xóa email" });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
 app.get("/api/pdf-signature/:mahoso", async (req, res) => {
   try {
     const { mahoso } = req.params;
@@ -188,53 +184,7 @@ app.get("/api/pdf-signature/:mahoso", async (req, res) => {
   }
 });
 
-app.post("/api/sign-pdf", async (req, res) => {
-  try {
-    const { pdfUrl, signatureData, MaHoSo, areaId } = req.body;
-    if (!pdfUrl || !signatureData || !MaHoSo || !areaId)
-      return res.status(400).json({ success: false, message: "Thiếu dữ liệu hoặc id vùng ký" });
 
-    const pdfBytes = await fetch(pdfUrl).then((r) => r.arrayBuffer());
-    const pdfDoc = await PDFDocument.load(pdfBytes);
-
-    const { data: area } = await supabase
-      .from("signatureareas")
-      .select("*")
-      .eq("id", areaId)
-      .maybeSingle();
-
-    if (!area) throw new Error("Không tìm thấy vùng ký!");
-
-    const page = pdfDoc.getPages()[area.pageIndex - 1];
-    const imageBytes = Buffer.from(signatureData.split(",")[1], "base64");
-    const pngImage = await pdfDoc.embedPng(imageBytes);
-
-    const scale = 0.7;
-    page.drawImage(pngImage, {
-      x: Number(area.x) + 10,
-      y: Number(area.y) + 5,
-      width: Number(area.width) * scale,
-      height: Number(area.height) * scale,
-    });
-
-    const signedBytes = await pdfDoc.save();
-    const fileName = `signed_${MaHoSo}_${Date.now()}.pdf`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("pdfs")
-      .upload(fileName, Buffer.from(signedBytes), {
-        contentType: "application/pdf",
-        upsert: true,
-      });
-    if (uploadError) throw uploadError;
-
-    const { data: publicUrlData } = supabase.storage.from("pdfs").getPublicUrl(fileName);
-    res.json({ success: true, pdfUrl: publicUrlData.publicUrl });
-  } catch (err) {
-    console.error("❌ Lỗi ký PDF:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
 
 // Make io accessible to routes - SỬA LẠI: Tạo biến toàn cục
 app.set("socketio", io);
@@ -275,115 +225,132 @@ app.delete("/api/yeucau/:id", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-// =================== Upload PDF và tạo vùng ký cho khách hàng ===================
+
+// ================== UPLOAD PDF & TẠO VÙNG KÝ ==================
 app.post("/api/upload-pdf", upload.single("pdf"), async (req, res) => {
   try {
     const { MaHoSo } = req.body;
     if (!req.file || !MaHoSo)
       return res.status(400).json({ success: false, message: "Thiếu file hoặc MaHoSo" });
 
-    // 1) Upload PDF gốc lên Supabase
+    // 1️⃣ Upload PDF gốc lên bucket 'pdfs_chuaky'
     const fileExt = req.file.originalname.split(".").pop();
-    const fileName = `yeucau_${MaHoSo}_${Date.now()}.${fileExt}`;
+    const fileName = `chuaky_${MaHoSo}_${Date.now()}.${fileExt}`;
 
     const { error: uploadError } = await supabase.storage
-      .from("pdfs")
+      .from("pdfs_chuaky")
       .upload(fileName, req.file.buffer, {
         contentType: "application/pdf",
         upsert: true,
       });
     if (uploadError) throw uploadError;
 
-    const { data: publicUrlData } = supabase.storage.from("pdfs").getPublicUrl(fileName);
-    const originalPdfUrl = publicUrlData.publicUrl;
+    const { data: publicUrlData } = supabase.storage
+      .from("pdfs_chuaky")
+      .getPublicUrl(fileName);
+    const pdfUrl = publicUrlData.publicUrl;
 
-    // 2) Tải PDF vừa upload, mở bằng pdf-lib
-    const pdfBytes = await fetch(originalPdfUrl).then((r) => r.arrayBuffer());
-    const pdfDoc = await PDFDocument.load(pdfBytes);
-    const totalPages = pdfDoc.getPageCount();
+    // 2️⃣ Lưu PDF gốc vào bảng PdfChuaKy
+    await supabase
+      .from("PdfChuaKy")
+      .upsert(
+        { MaHoSo, PdfUrl: pdfUrl, NgayTao: new Date().toISOString() },
+        { onConflict: "MaHoSo" }
+      );
 
-    // 3) Tạo vùng ký CHỈ CHO KHÁCH HÀNG (1 vùng duy nhất)
-    const pageIndexForSignature = Math.max(1, totalPages); // trang cuối
-
-    const page = pdfDoc.getPages()[pageIndexForSignature - 1];
-
-    // Vùng ký khách hàng (tọa độ mẫu - có thể điều chỉnh)
-    const customerArea = { 
-      x: 320, 
-      y: 140, 
-      width: 200, 
-      height: 50, 
-      pageIndex: pageIndexForSignature, 
-      label: "Khách hàng" 
-    };
-    
-    // Vẽ khung highlight cho vùng ký khách hàng
-    page.drawRectangle({
-      x: customerArea.x,
-      y: customerArea.y,
-      width: customerArea.width,
-      height: customerArea.height,
-      color: rgb(1, 1, 0), // nền vàng
-      opacity: 0.25,
-      borderColor: rgb(0, 0, 1),
-      borderWidth: 1,
-    });
-    page.drawText("Ký tên (Khách hàng)", {
-      x: customerArea.x + 6,
-      y: customerArea.y + customerArea.height - 14,
-      size: 10,
-      color: rgb(0, 0, 0),
-    });
-
-    // 4) Lưu PDF mới (có highlight vùng ký) và upload lại lên Supabase
-    const modifiedBytes = await pdfDoc.save();
-    const fileWithFields = `template_${MaHoSo}_${Date.now()}.pdf`;
-    const { error: reuploadError } = await supabase.storage
-      .from("pdfs")
-      .upload(fileWithFields, Buffer.from(modifiedBytes), {
-        contentType: "application/pdf",
-        upsert: true,
+    // 3️⃣ Tạo vùng ký mặc định (nếu chưa có)
+    await supabase
+      .from("signatureareas")
+      .upsert({
+        MaHoSo,
+        pageIndex: 1,
+        x: 195,
+        y: 510,
+        width: 90,
+        height: 25,
+        NgayTao: new Date().toISOString(),
       });
-    if (reuploadError) throw reuploadError;
 
-    const { data: publicWithFields } = supabase.storage.from("pdfs").getPublicUrl(fileWithFields);
-    const finalPdfUrl = publicWithFields.publicUrl;
+    // 4️⃣ Tạo link ký cho khách hàng
+    const signLink = `https://onepasscms.vercel.app/kyhoso/${MaHoSo}`;
 
-    // 5) Lưu link PDF chưa ký vào bảng PdfChuaKy
-    await supabase.from("PdfChuaKy").upsert(
-      { MaHoSo, PdfUrl: finalPdfUrl, NgayTao: new Date().toISOString() },
-      { onConflict: "MaHoSo" }
-    );
-
-    // 6) Lưu tọa độ vùng ký vào bảng SignatureAreas (CHỈ 1 VÙNG CHO KHÁCH HÀNG)
-    const signatureRows = [
-      {
-        "MaHoSo": MaHoSo, 
-        label: customerArea.label, 
-        x: customerArea.x, 
-        y: customerArea.y, 
-        width: customerArea.width, 
-        height: customerArea.height, 
-        pageIndex: customerArea.pageIndex 
-      }
-    ];
-    
-    const { error: insertError } = await supabase.from("signatureareas").insert(signatureRows);
-    if (insertError) {
-      console.warn("⚠️ Không thể lưu signatureareas:", insertError);
-    }
-
-    // 7) Trả về url đã tạo
     res.json({
       success: true,
-      message: "Upload PDF thành công và đã tạo vùng ký cho khách hàng.",
-      url: finalPdfUrl,
+      message: "Upload PDF thành công, đã tạo vùng ký.",
+      pdfUrl,
+      signLink,
     });
   } catch (err) {
     console.error("❌ Lỗi upload PDF:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
+
+// ================== KHÁCH HÀNG KÝ PDF ==================
+app.post("/api/sign-pdf", async (req, res) => {
+  try {
+    const { MaHoSo, signatureData } = req.body;
+    if (!MaHoSo || !signatureData)
+      return res.status(400).json({ success: false, message: "Thiếu MaHoSo hoặc chữ ký" });
+
+    // 1️⃣ Lấy PDF gốc từ PdfChuaKy
+    const { data: pdfData, error: pdfError } = await supabase
+      .from("PdfChuaKy")
+      .select("PdfUrl")
+      .eq("MaHoSo", MaHoSo)
+      .maybeSingle();
+    if (pdfError || !pdfData) throw new Error("Không tìm thấy PDF gốc");
+
+    // 2️⃣ Lấy vùng ký
+    const { data: area } = await supabase
+      .from("signatureareas")
+      .select("*")
+      .eq("MaHoSo", MaHoSo)
+      .maybeSingle();
+    if (!area) throw new Error("Không tìm thấy vùng ký!");
+
+    // 3️⃣ Tải PDF và chèn chữ ký
+    const pdfBytes = await fetch(pdfData.PdfUrl).then((r) => r.arrayBuffer());
+    const pdfDoc = await PDFDocument.load(pdfBytes);
+    const page = pdfDoc.getPages()[area.pageIndex - 1];
+
+    const imageBytes = Buffer.from(signatureData.split(",")[1], "base64");
+    const pngImage = await pdfDoc.embedPng(imageBytes);
+    page.drawImage(pngImage, {
+      x: Number(area.x),
+      y: Number(area.y),
+      width: Number(area.width),
+      height: Number(area.height),
+    });
+
+    // 4️⃣ Lưu vào bucket 'pdfs_daky'
+    const signedBytes = await pdfDoc.save();
+    const fileName = `daky_${MaHoSo}_${Date.now()}.pdf`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("pdfs_daky")
+      .upload(fileName, Buffer.from(signedBytes), {
+        contentType: "application/pdf",
+        upsert: true,
+      });
+    if (uploadError) throw uploadError;
+
+    const { data: publicUrlData } = supabase.storage
+      .from("pdfs_daky")
+      .getPublicUrl(fileName);
+
+    res.json({
+      success: true,
+      message: "Đã ký PDF và lưu vào pdfs_daky",
+      signedUrl: publicUrlData.publicUrl,
+    });
+  } catch (err) {
+    console.error("❌ Lỗi ký PDF:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 
 
 
