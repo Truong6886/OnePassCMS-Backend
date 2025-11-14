@@ -417,10 +417,11 @@ app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
   try {
     const { id } = req.params;
     
-    const { username, email, password } = req.body;
+    const { name, username, email, password } = req.body;
     
     console.log("Updating user:", { 
-      id, 
+      id,
+      name,
       username, 
       email, 
       hasPassword: !!password, 
@@ -429,6 +430,7 @@ app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
     });
 
     const updateData = { 
+      name,
       username, 
       email,
       updated_at: new Date().toISOString()
@@ -963,6 +965,7 @@ app.post("/api/login", async (req, res) => {
 
     const userInfo = { 
       id: user.id, 
+      name:user.name,
       username: user.username, 
       email: user.email, 
       is_admin: user.is_admin || false,
