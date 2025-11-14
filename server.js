@@ -9,11 +9,69 @@ import { Server } from "socket.io";
 import dotenv from "dotenv";
 import { PDFDocument, rgb } from "pdf-lib";
 import fetch from "node-fetch";
+import nodemailer from "nodemailer";
+import { google } from "googleapis";
 
-// ✅ Tạo vùng ký cho PDF có sẵn
-
-// ==== Load biến môi trường (.env) ====
 dotenv.config();
+
+function translateServiceName(name) {
+  const map = {
+    "인증 센터": "Chứng thực",
+    "결혼 이민": "Kết hôn",
+    "출생신고 대행": "Khai sinh, khai tử",
+    "출입국 행정 대행": "Xuất nhập cảnh",
+    "신분증명 서류 대행": "Giấy tờ tuỳ thân",
+    "입양 절차 대행": "Nhận nuôi",
+    "비자 대행": "Thị thực",
+    "법률 컨설팅": "Tư vấn pháp lý",
+    "B2B 서비스": "Dịch vụ B2B",
+    "기타": "Khác",
+  };
+
+  return map[name?.trim()] || name?.trim() || "";
+}
+
+const OAuth2 = google.auth.OAuth2;
+
+async function sendEmailToAdmin(subject, message, adminEmails = []) {
+  if (!adminEmails || adminEmails.length === 0) {
+    console.log("⚠️ Không có admin để gửi email");
+    return;
+  }
+
+  
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: process.env.GOOGLE_EMAIL,
+      pass: process.env.GOOGLE_APP_PASSWORD, 
+    },
+  });
+
+  await transporter.sendMail({
+    from: `"OnePass CMS" <${process.env.GOOGLE_EMAIL}>`,
+    to: adminEmails.join(","), 
+    subject,
+    html: message,
+  });
+
+  console.log("📧 Email đã gửi đến admin:", adminEmails);
+}
+
+
+async function getAdminEmails() {
+  const { data, error } = await supabase
+    .from("User")
+    .select("email")
+    .eq("role", "admin");  
+  if (error) {
+    console.error("❌ Lỗi lấy email admin:", error);
+    return [];
+  }
+
+  return data.map((u) => u.email).filter(Boolean);
+}
+
 
 // ==== Lấy thông tin Supabase ====
 const { SUPABASE_URL, SUPABASE_SERVICE_KEY } = process.env;
@@ -633,9 +691,9 @@ app.post("/api/tuvan", async (req, res) => {
       Gio
     } = req.body;
 
-    console.log("📨 Nhận yêu cầu tư vấn từ khách hàng:", req.body);
+    console.log("Nhận yêu cầu tư vấn từ khách hàng:", req.body);
 
-    if (!TenDichVu|| !HoTen || !MaVung || !SoDienThoai) {
+    if (!TenDichVu || !HoTen || !MaVung || !SoDienThoai) {
       return res.status(400).json({ success: false, message: "Thiếu dữ liệu bắt buộc" });
     }
 
@@ -677,7 +735,7 @@ app.post("/api/tuvan", async (req, res) => {
 
     if (error) throw error;
 
-    // 👉 Lấy lại bản ghi đầy đủ ngay sau khi insert
+    // 👉 Lấy lại bản ghi đầy đủ
     const { data: fullRecord } = await supabase
       .from("YeuCau")
       .select(`
@@ -688,14 +746,89 @@ app.post("/api/tuvan", async (req, res) => {
       .single();
 
     console.log("✅ Yêu cầu tư vấn đã được tạo:", fullRecord);
-    
-    // ✅ QUAN TRỌNG: Emit socket event - SỬA LẠI
-    console.log("📡 Emitting new_request event to all connected clients");
+
+
+    try {
+      const adminEmails = await getAdminEmails();
+
+      await sendEmailToAdmin(
+        "OnePass - Có yêu cầu tư vấn mới",
+            `
+        <div style="
+          max-width: 600px;
+          margin: auto;
+          padding: 20px;
+          font-family: 'Segoe UI', Arial, sans-serif;
+          border: 1px solid #e5e7eb;
+          border-radius: 10px;
+          background: #ffffff;
+        ">
+          
+          <h2 style="
+            color: #2C4D9E;
+            text-align: center;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #2C4D9E;
+            padding-bottom: 10px;
+          ">
+            Yêu cầu tư vấn mới
+          </h2>
+
+          <p style="font-size: 16px; color: #333;">
+            Một khách hàng vừa gửi yêu cầu tư vấn. Vui lòng xem chi tiết bên dưới:
+          </p>
+
+          <div style="
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #2C4D9E;
+            margin-top: 10px;
+            font-size: 15px;
+            color: #333;
+          ">
+            <p><b>Họ tên:</b> ${fullRecord.HoTen}</p>
+            <p><b>Dịch vụ yêu cầu:</b> ${translateServiceName(fullRecord.TenDichVu)}</p>
+            <p><b>Hình thức liên hệ:</b> ${fullRecord.TenHinhThuc}</p>
+            <p><b>Số điện thoại:</b> ${fullRecord.MaVung}${fullRecord.SoDienThoai}</p>
+            <p><b>Email khách:</b> ${fullRecord.Email || "Không có"}</p>
+            <p><b>Tiêu đề:</b> ${fullRecord.TieuDe || "Không có"}</p>
+            <p><b>Nội dung:</b> ${fullRecord.NoiDung || "Không có"}</p>
+          </div>
+
+          <div style="margin-top: 25px; text-align: center;">
+            <a href="https://onepasscms.vercel.app"
+              style="
+                background: #2C4D9E;
+                color: white;
+                padding: 12px 24px;
+                border-radius: 6px;
+                text-decoration: none;
+                font-size: 16px;
+                font-weight: bold;
+                display: inline-block;
+              ">
+              Mở CMS để xử lý
+            </a>
+          </div>
+
+          <p style="margin-top: 20px; font-size: 13px; color: #6c757d; text-align: center;">
+            Email được gửi tự động từ hệ thống OnePass CMS. Vui lòng không phản hồi lại email này.
+          </p>
+        </div>
+      `
+      ,
+        adminEmails
+      );
+
+      console.log("Email đã gửi đến admin:", adminEmails);
+
+    } catch (emailErr) {
+      console.error("❌ Lỗi gửi email admin:", emailErr);
+    }
+
     if (global.io) {
       global.io.emit("new_request", fullRecord);
-      console.log("✅ Socket event emitted successfully");
-    } else {
-      console.error("❌ Socket.io not available");
     }
 
     return res.json({
@@ -712,11 +845,12 @@ app.post("/api/tuvan", async (req, res) => {
 
 
 
+
 app.post("/api/yeucau", async (req, res) => {
   try {
     let newRequestData = { ...req.body };
 
-    console.log("🧾 [CMS] Admin đang thêm yêu cầu mới:", newRequestData);
+    console.log("[CMS] Admin đang thêm yêu cầu mới:", newRequestData);
 
     // ✅ Làm sạch dữ liệu
     for (const key of Object.keys(newRequestData)) {
@@ -750,8 +884,7 @@ app.post("/api/yeucau", async (req, res) => {
     const newRequest = data[0];
     console.log("✅ [CMS] Yêu cầu mới được tạo:", newRequest);
 
-    // ❌ KHÔNG PHÁT SOCKET ADMIN NỮA
-    // (chỉ khách hàng gửi form dùng socket "new_request")
+  
 
     res.json({
       success: true,
@@ -1012,6 +1145,6 @@ app.get("/api/health", (req, res) => {
 // ==== Start Server ====
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
-  console.log(`🚀 Server chạy tại http://localhost:${PORT}`);
-  console.log(`📡 Socket.io ready for connections`);
+  console.log(`Server chạy tại http://localhost:${PORT}`);
+  console.log(`Socket.io ready for connections`);
 });
