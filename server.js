@@ -292,25 +292,37 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
+
 app.get("/api/b2b/pending", async (req, res) => {
   try {
-    const { data, error } = await supabase
+    // Lấy danh sách pending từ Supabase
+    const { data: pendingList, error } = await supabase
       .from("B2B_PENDING")
       .select("*")
       .order("ID", { ascending: false });
 
     if (error) throw error;
 
-    res.json({ success: true, data });
+   
+    const mappedList = pendingList.map(item => ({
+      ...item,
+      DichVu: item.DichVu || "",      
+      DichVuKhac: item.DichVuKhac || "",
+    }));
+
+    res.json({ success: true, data: mappedList });
   } catch (err) {
+    console.error("Error fetching B2B_PENDING:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
 app.post("/api/b2b/approve/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Lấy dữ liệu từ bảng pending
+
     const { data: pendingData, error: pendingError } = await supabase
       .from("B2B_PENDING")
       .select("*")
@@ -321,12 +333,14 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
     if (!pendingData) {
       return res.status(404).json({
         success: false,
-        message: "Không tìm thấy doanh nghiệp",
+        message: "Không tìm thấy doanh nghiệp"
       });
     }
 
-    // Chèn vào bảng APPROVED
-    const { error: insertError } = await supabase
+    const dichVuNames = pendingData.DichVu || "";
+
+    // 2️⃣ Chèn vào bảng APPROVED
+    const { data: approvedData, error: insertError } = await supabase
       .from("B2B_APPROVED")
       .insert([
         {
@@ -336,46 +350,148 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
           Email: pendingData.Email,
           SoDienThoai: pendingData.SoDienThoai,
           NguoiDaiDien: pendingData.NguoiDaiDien,
-          NganhNgheChinh: "",
-          DiaChi: null,
-          DichVu: pendingData.DichVu,
-          DichVuKhac: pendingData.DichVuKhac,
-          PdfPath: pendingData.PdfPath,
-          TongDoanhThu: 0,
-          XepHang: "",
-        },
-      ]);
+          NganhNgheChinh: pendingData.NganhNgheChinh || "",
+          DiaChi: pendingData.DiaChi || null,
+          DichVu: dichVuNames,
+          DichVuKhac: pendingData.DichVuKhac || "",
+          PdfPath: pendingData.PdfPath || "",
+          TongDoanhThu: pendingData.TongDoanhThu || 0,
+          XepHang: pendingData.XepHang || "",
+        }
+      ])
+      .select()
+      .single();
 
     if (insertError) throw insertError;
 
+    const approvedId = approvedData.ID;
+
+    // 3️⃣ CHÈN DỊCH VỤ MẶC ĐỊNH VÀO BẢNG B2B_APPROVED_SERVICES
+    if (dichVuNames) {
+      await supabase.from("B2B_APPROVED_SERVICES").insert([
+        {
+          DoanhNghiepID: approvedId,
+          TenDichVu: dichVuNames,
+        }
+      ]);
+    }
+
+    // 4️⃣ Xóa pending
+    const { error: deleteError } = await supabase
+      .from("B2B_PENDING")
+      .delete()
+      .eq("ID", id);
+
+    if (deleteError) throw deleteError;
+
     return res.json({
       success: true,
-      message: "Duyệt doanh nghiệp thành công (không xoá pending)",
+      message: "Duyệt doanh nghiệp thành công"
     });
 
   } catch (err) {
     console.error("❌ Lỗi duyệt B2B:", err);
     return res.status(500).json({
       success: false,
-      message: err.message,
+      message: err.message
     });
+  }
+});
+
+app.get("/api/b2b/approved-with-services", async (req, res) => {
+  try {
+    const { data: approvedList, error } = await supabase
+      .from("B2B_APPROVED")
+      .select(`
+        *,
+        Services:B2B_APPROVED_SERVICES (*)
+      `)
+      .order("ID", { ascending: false });
+
+    if (error) throw error;
+
+    res.json({ success: true, data: approvedList });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+// ===================== UPDATE SERVICE ROW =====================
+app.put("/api/b2b/services/update/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      TenDichVu,
+      NgayThucHien,
+      NgayHoanThanh,
+      DoanhThuTruocCK,
+      MucChietKhau
+    } = req.body;
+
+    console.log("📌 Update service:", id, req.body);
+
+    // Tính tiền chiết khấu & doanh thu sau chiết khấu
+    const tienChietKhau = Math.round((DoanhThuTruocCK || 0) * (MucChietKhau || 0) / 100);
+    const doanhThuSauCK = (DoanhThuTruocCK || 0) - tienChietKhau;
+
+    const { data, error } = await supabase
+      .from("B2B_APPROVED_SERVICES")
+      .update({
+        TenDichVu,
+        NgayThucHien,
+        NgayHoanThanh,
+        DoanhThuTruocCK,
+        MucChietKhau,
+        TienChietKhau: tienChietKhau,
+        DoanhThuSauCK: doanhThuSauCK,
+        NgayCapNhat: new Date().toISOString(),
+      })
+      .eq("ID", id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error("❌ Lỗi update service:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
 app.get("/api/b2b/approved", async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const { SoDKKD } = req.query;
+
+    // Build query
+    let query = supabase
       .from("B2B_APPROVED")
       .select("*")
       .order("ID", { ascending: false });
 
+    if (SoDKKD) {
+      query = query.eq("SoDKKD", String(SoDKKD).trim());
+    }
+
+    const { data: approvedList, error } = await query;
     if (error) throw error;
 
-    res.json({ success: true, data });
+    // Nếu DichVu đã là tên dịch vụ, chỉ cần đảm bảo không null
+    const mappedList = approvedList.map(item => ({
+      ...item,
+      DichVu: item.DichVu || "",
+      DichVuKhac: item.DichVuKhac || "",
+    }));
+
+    res.json({ success: true, data: mappedList });
   } catch (err) {
+    console.error("Error fetching B2B_APPROVED:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
+
+
+
 app.post("/api/b2b/login", async (req, res) => {
   try {
     const { SoDKKD, MatKhau } = req.body;
@@ -390,7 +506,7 @@ app.post("/api/b2b/login", async (req, res) => {
       .select("*")
       .eq("SoDKKD", SoDKKD)
       .maybeSingle();
-
+   
     if (error) throw error;
     if (!userData) {
       return res.status(404).json({ success: false, message: "Không tìm thấy doanh nghiệp" });
@@ -398,6 +514,8 @@ app.post("/api/b2b/login", async (req, res) => {
 
   
     const match = await bcrypt.compare(MatKhau, userData.MatKhau);
+
+
     if (!match) {
       return res.status(401).json({ success: false, message: "Sai mật khẩu" });
     }
