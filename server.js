@@ -88,6 +88,8 @@ app.use(cors({
   origin: [
     "http://localhost:3000",
     "http://localhost:5173",
+    "https://onepasskr.com",
+    "https://b2bonepass.vercel.app"
     "https://onepass-gamma.vercel.app",
     "http://localhost:8080",
     "https://onepasscms.vercel.app" 
@@ -121,6 +123,8 @@ const io = new Server(server, {
     origin: [
       "https://onepass-gamma.vercel.app",
       "http://localhost:5173",
+      "https://onepasskr.com",
+      "https://b2bonepass.vercel.app",
       "http://localhost:8080",
       "https://onepasscms.vercel.app"
     ],
