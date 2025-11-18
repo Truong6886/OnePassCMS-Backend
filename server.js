@@ -39,7 +39,7 @@ async function sendEmailToAdmin(subject, message, adminEmails = []) {
     return;
   }
 
-  
+
   const transporter = nodemailer.createTransport({
     service: "gmail",
     auth: {
@@ -88,7 +88,7 @@ app.use(cors({
   origin: [
     "http://localhost:3000",
     "http://localhost:5173",
-    "https://onepasskr.com",
+    "https://onepasskr.com", 
     "https://b2bonepass.vercel.app",
     "https://onepass-gamma.vercel.app",
     "http://localhost:8080",
@@ -137,11 +137,11 @@ const io = new Server(server, {
 // Socket.io connection handler
 io.on("connection", (socket) => {
   console.log("📡 Client connected:", socket.id);
-  
+
   socket.on("disconnect", (reason) => {
     console.log("❌ Client disconnected:", socket.id, "Reason:", reason);
   });
-  
+
   socket.on("error", (error) => {
     console.error("Socket error:", error);
   });
@@ -308,7 +308,7 @@ app.get("/api/b2b/pending", async (req, res) => {
 
     if (error) throw error;
 
-   
+
     const mappedList = pendingList.map(item => ({
       ...item,
       DichVu: item.DichVu || "",      
@@ -325,6 +325,7 @@ app.get("/api/b2b/pending", async (req, res) => {
 app.post("/api/b2b/approve/:id", async (req, res) => {
   try {
     const { id } = req.params;
+
 
     const { data: pendingData, error: pendingError } = await supabase
       .from("B2B_PENDING")
@@ -367,7 +368,17 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
 
     if (insertError) throw insertError;
 
-    // ❌ 3️⃣ ĐÃ XOÁ - KHÔNG CHÈN VÀO B2B_APPROVED_SERVICES NỮA
+    const approvedId = approvedData.ID;
+
+    // 3️⃣ CHÈN DỊCH VỤ MẶC ĐỊNH VÀO BẢNG B2B_APPROVED_SERVICES
+    if (dichVuNames) {
+      await supabase.from("B2B_APPROVED_SERVICES").insert([
+        {
+          DoanhNghiepID: approvedId,
+          TenDichVu: dichVuNames,
+        }
+      ]);
+    }
 
     // 4️⃣ Xóa pending
     const { error: deleteError } = await supabase
@@ -499,13 +510,13 @@ app.post("/api/b2b/login", async (req, res) => {
       .select("*")
       .eq("SoDKKD", SoDKKD)
       .maybeSingle();
-   
+
     if (error) throw error;
     if (!userData) {
       return res.status(404).json({ success: false, message: "Không tìm thấy doanh nghiệp" });
     }
 
-  
+
     const match = await bcrypt.compare(MatKhau, userData.MatKhau);
 
 
@@ -730,9 +741,9 @@ app.post("/api/sign-pdf", async (req, res) => {
 app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const { name, username, email, password } = req.body;
-    
+
     console.log("Updating user:", { 
       id,
       name,
@@ -764,9 +775,9 @@ app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
 
       const fileExt = req.file.originalname.split(".").pop() || 'jpg';
       const fileName = `avatar_${id}_${Date.now()}.${fileExt}`;
-      
+
       console.log("Uploading avatar to Supabase storage:", fileName);
-      
+
       const { error: uploadError } = await supabase.storage
         .from("avatars")
         .upload(fileName, req.file.buffer, { 
@@ -782,7 +793,7 @@ app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
       const { data: publicUrlData } = supabase.storage
         .from("avatars")
         .getPublicUrl(fileName);
-        
+
       updateData.avatar = publicUrlData.publicUrl;
       console.log("Avatar uploaded successfully. URL:", publicUrlData.publicUrl);
     }
@@ -936,7 +947,7 @@ app.get("/api/yeucau", async (req, res) => {
 
     const isAdmin = is_admin === true || is_admin === "true";
 
-    
+
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
     const pageLimit = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
     const from = (pageNum - 1) * pageLimit;
@@ -1200,7 +1211,7 @@ app.post("/api/yeucau", async (req, res) => {
     const newRequest = data[0];
     console.log("✅ [CMS] Yêu cầu mới được tạo:", newRequest);
 
-  
+
 
     res.json({
       success: true,
