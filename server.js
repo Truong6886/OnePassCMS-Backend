@@ -226,6 +226,22 @@ app.delete("/api/email/:id", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+// LẤY DANH SÁCH TẤT CẢ SERVICES ĐƯỢC APPROVED
+app.get("/api/b2b/approved-services", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("B2B_APPROVED_SERVICES")
+      .select("*")
+      .order("ID", { ascending: false });
+
+    if (error) throw error;
+
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error("❌ Lỗi load approved services:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
   try {
@@ -492,9 +508,222 @@ app.get("/api/b2b/approved", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+app.post("/api/b2b/approve/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
 
+    const { data: pendingData, error: pendingError } = await supabase
+      .from("B2B_PENDING")
+      .select("*")
+      .eq("ID", id)
+      .maybeSingle();
 
+    if (pendingError) throw pendingError;
+    if (!pendingData) {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy doanh nghiệp"
+      });
+    }
 
+    const dichVuNames = pendingData.DichVu || "";
+
+    // Chèn vào bảng APPROVED
+    const { data: approvedData, error: insertError } = await supabase
+      .from("B2B_APPROVED")
+      .insert([
+        {
+          TenDoanhNghiep: pendingData.TenDoanhNghiep,
+          SoDKKD: pendingData.SoDKKD,
+          MatKhau: pendingData.MatKhau,
+          Email: pendingData.Email,
+          SoDienThoai: pendingData.SoDienThoai,
+          NguoiDaiDien: pendingData.NguoiDaiDien,
+          NganhNgheChinh: pendingData.NganhNgheChinh || "",
+          DiaChi: pendingData.DiaChi || null,
+          DichVu: dichVuNames,
+          DichVuKhac: pendingData.DichVuKhac || "",
+          PdfPath: pendingData.PdfPath || "",
+          TongDoanhThu: pendingData.TongDoanhThu || 0,
+          XepHang: pendingData.XepHang || "",
+        }
+      ])
+      .select()
+      .single();
+
+    if (insertError) throw insertError;
+
+    const approvedId = approvedData.ID;
+
+    // CHÈN TẤT CẢ DỊCH VỤ VÀO BẢNG B2B_APPROVED_SERVICES
+    if (dichVuNames) {
+      const servicesArray = dichVuNames.split(",").map(dv => dv.trim());
+      
+      const servicesToInsert = servicesArray.map(serviceName => ({
+        DoanhNghiepID: approvedId,
+        TenDichVu: serviceName,
+        NgayTao: new Date().toISOString(),
+        NgayCapNhat: new Date().toISOString()
+      }));
+
+      const { error: servicesError } = await supabase
+        .from("B2B_APPROVED_SERVICES")
+        .insert(servicesToInsert);
+
+      if (servicesError) throw servicesError;
+    }
+
+    // Xóa pending
+    const { error: deleteError } = await supabase
+      .from("B2B_PENDING")
+      .delete()
+      .eq("ID", id);
+
+    if (deleteError) throw deleteError;
+
+    return res.json({
+      success: true,
+      message: "Duyệt doanh nghiệp thành công"
+    });
+
+  } catch (err) {
+    console.error("❌ Lỗi duyệt B2B:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message
+    });
+  }
+});
+
+// API lấy danh sách dịch vụ theo SoDKKD từ bảng B2B_APPROVED_SERVICES
+app.get("/api/b2b/approved-services/:soDKKD", async (req, res) => {
+  try {
+    const { soDKKD } = req.params;
+
+    if (!soDKKD) {
+      return res.status(400).json({
+        success: false,
+        message: "Thiếu số đăng ký kinh doanh"
+      });
+    }
+
+    // Lấy thông tin công ty từ B2B_APPROVED
+    const { data: companyData, error: companyError } = await supabase
+      .from("B2B_APPROVED")
+      .select("ID")
+      .eq("SoDKKD", soDKKD)
+      .single();
+
+    if (companyError || !companyData) {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy doanh nghiệp"
+      });
+    }
+
+    const companyId = companyData.ID;
+
+    // Lấy danh sách dịch vụ từ B2B_APPROVED_SERVICES
+    const { data: services, error: servicesError } = await supabase
+      .from("B2B_APPROVED_SERVICES")
+      .select("*")
+      .eq("DoanhNghiepID", companyId)
+      .order("ID", { ascending: true });
+
+    if (servicesError) throw servicesError;
+
+    res.json({
+      success: true,
+      data: services || []
+    });
+
+  } catch (err) {
+    console.error("❌ Lỗi lấy danh sách dịch vụ:", err);
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+  }
+});
+
+// API thêm dịch vụ mới vào B2B_APPROVED_SERVICES
+app.post("/api/b2b/approved-services/:soDKKD", async (req, res) => {
+  try {
+    const { soDKKD } = req.params;
+    const {
+      TenDichVu,
+      MaDichVu,
+      NgayBatDau,
+      NgayHoanThanh,
+      DoanhThuTruocChietKhau,
+      MucChietKhau
+    } = req.body;
+
+    if (!soDKKD || !TenDichVu) {
+      return res.status(400).json({
+        success: false,
+        message: "Thiếu dữ liệu bắt buộc"
+      });
+    }
+
+    // Lấy thông tin công ty từ B2B_APPROVED
+    const { data: companyData, error: companyError } = await supabase
+      .from("B2B_APPROVED")
+      .select("ID")
+      .eq("SoDKKD", soDKKD)
+      .single();
+
+    if (companyError || !companyData) {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy doanh nghiệp"
+      });
+    }
+
+    const companyId = companyData.ID;
+
+    // Tính toán các giá trị
+    const SoTienChietKhau = Math.round(DoanhThuTruocChietKhau * (MucChietKhau / 100));
+    const DoanhThuSauChietKhau = DoanhThuTruocChietKhau - SoTienChietKhau;
+    const TongDoanhThu = DoanhThuSauChietKhau;
+
+    // Thêm dịch vụ mới vào B2B_APPROVED_SERVICES
+    const { data: newService, error: insertError } = await supabase
+      .from("B2B_APPROVED_SERVICES")
+      .insert([
+        {
+          DoanhNghiepID: companyId,
+          TenDichVu,
+          MaDichVu: MaDichVu || null,
+          NgayThucHien: NgayBatDau,
+          NgayHoanThanh: NgayHoanThanh || null,
+          DoanhThuTruocCK: DoanhThuTruocChietKhau,
+          MucChietKhau: MucChietKhau || 0,
+          TienChietKhau: SoTienChietKhau,
+          DoanhThuSauCK: DoanhThuSauChietKhau,
+          NgayTao: new Date().toISOString(),
+          NgayCapNhat: new Date().toISOString()
+        }
+      ])
+      .select()
+      .single();
+
+    if (insertError) throw insertError;
+
+    res.json({
+      success: true,
+      message: "Thêm dịch vụ thành công",
+      data: newService
+    });
+
+  } catch (err) {
+    console.error("❌ Lỗi thêm dịch vụ:", err);
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+  }
+});
 
 app.post("/api/b2b/login", async (req, res) => {
   try {
