@@ -326,7 +326,6 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-
     const { data: pendingData, error: pendingError } = await supabase
       .from("B2B_PENDING")
       .select("*")
@@ -368,17 +367,7 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
 
     if (insertError) throw insertError;
 
-    const approvedId = approvedData.ID;
-
-    // 3️⃣ CHÈN DỊCH VỤ MẶC ĐỊNH VÀO BẢNG B2B_APPROVED_SERVICES
-    if (dichVuNames) {
-      await supabase.from("B2B_APPROVED_SERVICES").insert([
-        {
-          DoanhNghiepID: approvedId,
-          TenDichVu: dichVuNames,
-        }
-      ]);
-    }
+    // ❌ 3️⃣ ĐÃ XOÁ - KHÔNG CHÈN VÀO B2B_APPROVED_SERVICES NỮA
 
     // 4️⃣ Xóa pending
     const { error: deleteError } = await supabase
