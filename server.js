@@ -417,7 +417,174 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
     });
   }
 });
+app.get("/api/b2b/services", async (req, res) => {
+  try {
+    // React gửi lên: /api/b2b/services?DoanhNghiepID=123
+    const { DoanhNghiepID } = req.query;
 
+    if (!DoanhNghiepID) {
+      return res.status(400).json({ success: false, message: "Thiếu DoanhNghiepID" });
+    }
+
+    // Lấy dữ liệu từ bảng B2B_SERVICES
+    const { data, error } = await supabase
+      .from("B2B_SERVICES")
+      .select("*")
+      .eq("DoanhNghiepID", DoanhNghiepID)
+      .order("STT", { ascending: true }); // Sắp xếp theo thứ tự thêm
+
+    if (error) throw error;
+
+    // 🔄 MAP dữ liệu để khớp với biến trong React (OrdersPage.jsx)
+    const formattedData = data.map(item => ({
+      ID: item.STT,                   // React dùng .ID -> DB là STT
+      MaDichVu: item.ServiceID,       // React dùng .MaDichVu -> DB là ServiceID
+      TenDichVu: item.TenDichVu,
+      NgayThucHien: item.NgayThucHien,
+      NgayHoanThanh: item.NgayHoanThanh,
+      DoanhThuTruocChietKhau: item.DoanhThuTruocChietKhau,
+      MucChietKhau: item.MucChietKhau,
+      SoTienChietKhau: item.SoTienChietKhau,
+      DoanhThuSauChietKhau: item.DoanhThuSauChietKhau,
+      TongDoanhThuTichLuy: item.TongDoanhThuTichLuy
+    }));
+
+    res.json({ success: true, data: formattedData });
+  } catch (err) {
+    console.error("❌ Lỗi lấy B2B_SERVICES:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 2️⃣ POST: Thêm mới một dòng dịch vụ
+app.post("/api/b2b/services", async (req, res) => {
+  try {
+    // Lấy dữ liệu từ React gửi lên
+    const {
+      DoanhNghiepID,
+      TenDichVu,   
+      MaDichVu,    // Code tự sinh ở Frontend
+      NgayThucHien,
+      NgayHoanThanh,
+      DoanhThuTruocChietKhau,
+      MucChietKhau,
+      SoTienChietKhau,
+      DoanhThuSauChietKhau,
+      TongDoanhThuTichLuy
+    } = req.body;
+
+    if (!DoanhNghiepID || !TenDichVu) {
+      return res.status(400).json({ success: false, message: "Thiếu thông tin bắt buộc" });
+    }
+
+    const { data, error } = await supabase
+      .from("B2B_SERVICES")
+      .insert([
+        {
+          DoanhNghiepID,
+          TenDichVu,
+          ServiceID: MaDichVu, // Map MaDichVu -> ServiceID
+          NgayThucHien: NgayThucHien || null,
+          NgayHoanThanh: NgayHoanThanh || null,
+          DoanhThuTruocChietKhau,
+          MucChietKhau,
+          SoTienChietKhau,
+          DoanhThuSauChietKhau,
+          TongDoanhThuTichLuy,
+          CreatedAt: new Date().toISOString()
+        }
+      ])
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    // Trả về ID mới tạo (STT) để React cập nhật giao diện
+    res.json({ 
+      success: true, 
+      data: { ...data, ID: data.STT } 
+    });
+
+  } catch (err) {
+    console.error("❌ Lỗi thêm B2B_SERVICES:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 3️⃣ PUT: Cập nhật dịch vụ
+// ===================== UPDATE SERVICE ROW =====================
+app.put("/api/b2b/services/update/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    // Lấy dữ liệu từ Client gửi lên
+    const {
+      TenDichVu,
+      NgayThucHien,
+      NgayHoanThanh,
+      DoanhThuTruocCK, // Client gửi tên biến này
+      MucChietKhau
+    } = req.body;
+
+    console.log("📌 Update service ID:", id); 
+
+    // Tính toán
+    const tienChietKhau = Math.round((DoanhThuTruocCK || 0) * (MucChietKhau || 0) / 100);
+    const doanhThuSauCK = (DoanhThuTruocCK || 0) - tienChietKhau;
+
+    const { data, error } = await supabase
+      .from("B2B_APPROVED_SERVICES")
+      .update({
+        TenDichVu,
+        NgayThucHien: NgayThucHien || null,
+        NgayHoanThanh: NgayHoanThanh || null,
+        
+        // Mapping tên cột chuẩn xác
+        DoanhThuTruocChietKhau: DoanhThuTruocCK, 
+        MucChietKhau: MucChietKhau || 0,
+        SoTienChietKhau: tienChietKhau, 
+        DoanhThuSauChietKhau: doanhThuSauCK,
+        
+        NgayCapNhat: new Date().toISOString(),
+      })
+      .eq("ID", id)
+      .select()
+      .maybeSingle(); 
+
+    if (error) throw error;
+
+    // Nếu data là null nghĩa là không tìm thấy ID để update
+    if (!data) {
+      console.error(`❌ Không tìm thấy dịch vụ có ID = ${id} trong bảng B2B_APPROVED_SERVICES`);
+      return res.status(404).json({ 
+        success: false, 
+        message: "Không tìm thấy dịch vụ này (ID sai hoặc đã bị xóa)." 
+      });
+    }
+
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error("❌ Lỗi update service:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+// 4️⃣ DELETE: Xóa dịch vụ
+app.delete("/api/b2b/services/:id", async (req, res) => {
+  try {
+    const { id } = req.params; // Đây là STT
+
+    const { error } = await supabase
+      .from("B2B_SERVICES")
+      .delete()
+      .eq("STT", id);
+
+    if (error) throw error;
+
+    res.json({ success: true, message: "Đã xóa dịch vụ" });
+  } catch (err) {
+    console.error("❌ Lỗi xóa B2B_SERVICES:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 app.get("/api/b2b/approved-with-services", async (req, res) => {
   try {
     const { data: approvedList, error } = await supabase
@@ -439,17 +606,18 @@ app.get("/api/b2b/approved-with-services", async (req, res) => {
 app.put("/api/b2b/services/update/:id", async (req, res) => {
   try {
     const { id } = req.params;
+    // Lấy dữ liệu từ Client gửi lên
     const {
       TenDichVu,
       NgayThucHien,
       NgayHoanThanh,
-      DoanhThuTruocCK,
+      DoanhThuTruocCK, // Client gửi tên biến này
       MucChietKhau
     } = req.body;
 
     console.log("📌 Update service:", id, req.body);
 
-    // Tính tiền chiết khấu & doanh thu sau chiết khấu
+    // Tính toán
     const tienChietKhau = Math.round((DoanhThuTruocCK || 0) * (MucChietKhau || 0) / 100);
     const doanhThuSauCK = (DoanhThuTruocCK || 0) - tienChietKhau;
 
@@ -459,10 +627,12 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
         TenDichVu,
         NgayThucHien,
         NgayHoanThanh,
-        DoanhThuTruocCK,
+       
+        DoanhThuTruocChietKhau: DoanhThuTruocCK, 
         MucChietKhau,
-        TienChietKhau: tienChietKhau,
-        DoanhThuSauCK: doanhThuSauCK,
+        SoTienChietKhau: tienChietKhau,     // DB dùng SoTienChietKhau hay TienChietKhau? Kiểm tra lại
+        DoanhThuSauChietKhau: doanhThuSauCK, // DB dùng DoanhThuSauChietKhau
+        
         NgayCapNhat: new Date().toISOString(),
       })
       .eq("ID", id)
@@ -477,7 +647,6 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-
 app.get("/api/b2b/approved", async (req, res) => {
   try {
     const { SoDKKD } = req.query;
