@@ -253,7 +253,8 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
       SoDienThoai,
       NguoiDaiDien,
       DichVu,
-      DichVuKhac
+      DichVuKhac,
+      NganhNgheChinh // <-- Thêm trường này
     } = req.body;
 
     if (!TenDoanhNghiep || !SoDKKD || !Email || !MatKhau) {
@@ -299,6 +300,7 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
           NguoiDaiDien,
           DichVu,
           DichVuKhac,
+          NganhNgheChinh, // <-- Thêm vào đây
           PdfPath
         }
       ])
@@ -312,6 +314,7 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
 
 
 app.get("/api/b2b/pending", async (req, res) => {
