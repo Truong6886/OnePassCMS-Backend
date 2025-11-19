@@ -382,7 +382,6 @@ app.put("/api/b2b/pending/:id", async (req, res) => {
       PdfPath 
     } = req.body;
 
-    console.log("📝 Đang cập nhật hồ sơ chờ duyệt ID:", id);
 
     const { data, error } = await supabase
       .from("B2B_PENDING")
@@ -401,7 +400,7 @@ app.put("/api/b2b/pending/:id", async (req, res) => {
 
     res.json({ success: true, message: "Cập nhật thành công", data });
   } catch (err) {
-    console.error("❌ Lỗi update B2B Pending:", err);
+    console.error("Lỗi update B2B Pending:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
