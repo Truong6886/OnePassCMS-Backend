@@ -242,7 +242,62 @@ app.get("/api/b2b/approved-services", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+app.put("/api/b2b/approved/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { TenDoanhNghiep, SoDKKD, NguoiDaiDien, NganhNgheChinh } = req.body;
 
+    const { data, error } = await supabase
+      .from("B2B_APPROVED")
+      .update({
+        TenDoanhNghiep,
+        SoDKKD,
+        NguoiDaiDien,
+        NganhNgheChinh,
+        // Có thể thêm các trường khác nếu cần
+      })
+      .eq("ID", id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.json({ success: true, message: "Cập nhật thành công", data });
+  } catch (err) {
+    console.error("❌ Lỗi update B2B Approved:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
+app.delete("/api/b2b/approved/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+ 
+    const { error: deleteServicesError } = await supabase
+      .from("B2B_APPROVED_SERVICES")
+      .delete()
+      .eq("DoanhNghiepID", id);
+    
+    if (deleteServicesError) {
+        console.log("⚠️ Lỗi xóa dịch vụ con (có thể không có dịch vụ nào):", deleteServicesError.message);
+        
+    }
+
+    const { error: deleteCompanyError } = await supabase
+      .from("B2B_APPROVED")
+      .delete()
+      .eq("ID", id);
+
+    if (deleteCompanyError) throw deleteCompanyError;
+
+    res.json({ success: true, message: "Đã xóa doanh nghiệp và dịch vụ liên quan" });
+  } catch (err) {
+    console.error("❌ Lỗi xóa B2B Approved:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
   try {
     const {
@@ -254,7 +309,7 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
       NguoiDaiDien,
       DichVu,
       DichVuKhac,
-      NganhNgheChinh // <-- Thêm trường này
+      NganhNgheChinh 
     } = req.body;
 
     if (!TenDoanhNghiep || !SoDKKD || !Email || !MatKhau) {
@@ -316,10 +371,44 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
 });
 
 
+app.put("/api/b2b/pending/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { 
+      TenDoanhNghiep, 
+      SoDKKD, 
+      NguoiDaiDien, 
+      DichVu, 
+      PdfPath 
+    } = req.body;
+
+    console.log("📝 Đang cập nhật hồ sơ chờ duyệt ID:", id);
+
+    const { data, error } = await supabase
+      .from("B2B_PENDING")
+      .update({
+        TenDoanhNghiep,
+        SoDKKD,
+        NguoiDaiDien,
+        DichVu,
+        PdfPath
+      })
+      .eq("ID", id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.json({ success: true, message: "Cập nhật thành công", data });
+  } catch (err) {
+    console.error("❌ Lỗi update B2B Pending:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 app.get("/api/b2b/pending", async (req, res) => {
   try {
-    // Lấy danh sách pending từ Supabase
+ 
     const { data: pendingList, error } = await supabase
       .from("B2B_PENDING")
       .select("*")
@@ -362,7 +451,7 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
 
     const dichVuNames = pendingData.DichVu || "";
 
-    // 2️⃣ Chèn vào bảng APPROVED
+   
     const { data: approvedData, error: insertError } = await supabase
       .from("B2B_APPROVED")
       .insert([
@@ -389,7 +478,7 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
 
     const approvedId = approvedData.ID;
 
-    // 3️⃣ CHÈN DỊCH VỤ MẶC ĐỊNH VÀO BẢNG B2B_APPROVED_SERVICES
+   
     if (dichVuNames) {
       await supabase.from("B2B_APPROVED_SERVICES").insert([
         {
@@ -422,27 +511,27 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
 });
 app.get("/api/b2b/services", async (req, res) => {
   try {
-    // React gửi lên: /api/b2b/services?DoanhNghiepID=123
+
     const { DoanhNghiepID } = req.query;
 
     if (!DoanhNghiepID) {
       return res.status(400).json({ success: false, message: "Thiếu DoanhNghiepID" });
     }
 
-    // Lấy dữ liệu từ bảng B2B_SERVICES
+    
     const { data, error } = await supabase
       .from("B2B_SERVICES")
       .select("*")
       .eq("DoanhNghiepID", DoanhNghiepID)
-      .order("STT", { ascending: true }); // Sắp xếp theo thứ tự thêm
+      .order("STT", { ascending: true }); 
 
     if (error) throw error;
 
-    // 🔄 MAP dữ liệu để khớp với biến trong React (OrdersPage.jsx)
+
     const formattedData = data.map(item => ({
-      ID: item.STT,                   // React dùng .ID -> DB là STT
-      MaDichVu: item.ServiceID,       // React dùng .MaDichVu -> DB là ServiceID
-      TenDichVu: item.TenDichVu,
+      ID: item.STT,                
+      MaDichVu: item.ServiceID,    
+      LoaiDichVu: item.LoaiDichVu,
       NgayThucHien: item.NgayThucHien,
       NgayHoanThanh: item.NgayHoanThanh,
       DoanhThuTruocChietKhau: item.DoanhThuTruocChietKhau,
@@ -459,14 +548,14 @@ app.get("/api/b2b/services", async (req, res) => {
   }
 });
 
-// 2️⃣ POST: Thêm mới một dòng dịch vụ
+
 app.post("/api/b2b/services", async (req, res) => {
   try {
-    // Lấy dữ liệu từ React gửi lên
+    
     const {
       DoanhNghiepID,
-      TenDichVu,   
-      MaDichVu,    // Code tự sinh ở Frontend
+      LoaiDichVu,   
+      MaDichVu,   
       NgayThucHien,
       NgayHoanThanh,
       DoanhThuTruocChietKhau,
@@ -476,7 +565,7 @@ app.post("/api/b2b/services", async (req, res) => {
       TongDoanhThuTichLuy
     } = req.body;
 
-    if (!DoanhNghiepID || !TenDichVu) {
+    if (!DoanhNghiepID || !LoaiDichVu) {
       return res.status(400).json({ success: false, message: "Thiếu thông tin bắt buộc" });
     }
 
@@ -485,8 +574,8 @@ app.post("/api/b2b/services", async (req, res) => {
       .insert([
         {
           DoanhNghiepID,
-          TenDichVu,
-          ServiceID: MaDichVu, // Map MaDichVu -> ServiceID
+          LoaiDichVu,
+          ServiceID: MaDichVu, 
           NgayThucHien: NgayThucHien || null,
           NgayHoanThanh: NgayHoanThanh || null,
           DoanhThuTruocChietKhau,
@@ -502,7 +591,7 @@ app.post("/api/b2b/services", async (req, res) => {
 
     if (error) throw error;
 
-    // Trả về ID mới tạo (STT) để React cập nhật giao diện
+
     res.json({ 
       success: true, 
       data: { ...data, ID: data.STT } 
@@ -514,17 +603,16 @@ app.post("/api/b2b/services", async (req, res) => {
   }
 });
 
-// 3️⃣ PUT: Cập nhật dịch vụ
-// ===================== UPDATE SERVICE ROW =====================
+
 app.put("/api/b2b/services/update/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    // Lấy dữ liệu từ Client gửi lên
+
     const {
       TenDichVu,
       NgayThucHien,
       NgayHoanThanh,
-      DoanhThuTruocCK, // Client gửi tên biến này
+      DoanhThuTruocCK,
       MucChietKhau
     } = req.body;
 
@@ -555,7 +643,7 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
 
     if (error) throw error;
 
-    // Nếu data là null nghĩa là không tìm thấy ID để update
+  
     if (!data) {
       console.error(`❌ Không tìm thấy dịch vụ có ID = ${id} trong bảng B2B_APPROVED_SERVICES`);
       return res.status(404).json({ 
@@ -605,7 +693,7 @@ app.get("/api/b2b/approved-with-services", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-// ===================== UPDATE SERVICE ROW =====================
+
 app.put("/api/b2b/services/update/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -614,7 +702,7 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
       TenDichVu,
       NgayThucHien,
       NgayHoanThanh,
-      DoanhThuTruocCK, // Client gửi tên biến này
+      DoanhThuTruocCK, 
       MucChietKhau
     } = req.body;
 
@@ -633,8 +721,8 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
        
         DoanhThuTruocChietKhau: DoanhThuTruocCK, 
         MucChietKhau,
-        SoTienChietKhau: tienChietKhau,     // DB dùng SoTienChietKhau hay TienChietKhau? Kiểm tra lại
-        DoanhThuSauChietKhau: doanhThuSauCK, // DB dùng DoanhThuSauChietKhau
+        SoTienChietKhau: tienChietKhau,    
+        DoanhThuSauChietKhau: doanhThuSauCK,
         
         NgayCapNhat: new Date().toISOString(),
       })
@@ -767,7 +855,7 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
   }
 });
 
-// API lấy danh sách dịch vụ theo SoDKKD từ bảng B2B_APPROVED_SERVICES
+
 app.get("/api/b2b/approved-services/:soDKKD", async (req, res) => {
   try {
     const { soDKKD } = req.params;
@@ -970,9 +1058,9 @@ app.get("/api/pdf-signature/:mahoso", async (req, res) => {
 
 
 
-// Make io accessible to routes - SỬA LẠI: Tạo biến toàn cục
+
 app.set("socketio", io);
-global.io = io; // ✅ THÊM DÒNG NÀY
+global.io = io; 
 
 // ==== ROUTES ====
 
@@ -1010,7 +1098,7 @@ app.delete("/api/yeucau/:id", async (req, res) => {
   }
 });
 
-// ================== UPLOAD PDF & TẠO VÙNG KÝ ==================
+
 app.post("/api/upload-pdf", upload.single("pdf"), async (req, res) => {
   try {
     const { MaHoSo } = req.body;
