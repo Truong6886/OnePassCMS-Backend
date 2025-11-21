@@ -32,7 +32,7 @@ function translateServiceName(name) {
 }
 
 const OAuth2 = google.auth.OAuth2;
-
+  
 async function sendEmailToAdmin(subject, message, adminEmails = []) {
   if (!adminEmails || adminEmails.length === 0) {
     console.log("⚠️ Không có admin để gửi email");
@@ -321,9 +321,9 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
 
     let PdfPath = null;
 
-    // Upload PDF nếu có
+   
     if (req.file) {
-      const fileName = `b2b_${Date.now()}.pdf`;
+      const fileName = `b2b_${Date.now()}_${req.file.originalname}`;
 
       const { error: uploadError } = await supabase.storage
         .from("b2b_pdf")
@@ -332,8 +332,12 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
           upsert: true
         });
 
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        console.error("❌ Lỗi upload PDF:", uploadError);
+        throw uploadError;
+      }
 
+      // Lấy public URL
       const { data: publicUrl } = supabase.storage
         .from("b2b_pdf")
         .getPublicUrl(fileName);
@@ -355,7 +359,7 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
           NguoiDaiDien,
           DichVu,
           DichVuKhac,
-          NganhNgheChinh, 
+          NganhNgheChinh,
           PdfPath
         }
       ])
@@ -369,7 +373,6 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-
 
 // API chỉ để cập nhật thông tin doanh nghiệp pending
 app.put("/api/b2b/pending/:id", async (req, res) => {
