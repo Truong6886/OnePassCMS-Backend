@@ -10,7 +10,7 @@ import dotenv from "dotenv";
 import { PDFDocument, rgb } from "pdf-lib";
 import fetch from "node-fetch";
 import nodemailer from "nodemailer";
-
+import emailjs from '@emailjs/nodejs';
 dotenv.config();
 
 function translateServiceName(name) {
@@ -29,45 +29,34 @@ function translateServiceName(name) {
 
   return map[name?.trim()] || name?.trim() || "";
 }
+import emailjs from '@emailjs/nodejs';
 
-async function sendEmailToAdmin(subject, message, adminEmails = []) {
-  if (!adminEmails || adminEmails.length === 0) {
-    console.log("⚠️ Không có admin để gửi email");
-    return;
-  }
+// Khởi tạo (giữ nguyên như bước trước)
+emailjs.init({
+  publicKey: process.env.EMAILJS_PUBLIC_KEY,
+  privateKey: process.env.EMAILJS_PRIVATE_KEY,
+});
+
+async function sendEmailToAdmin(subject, htmlContent, adminEmails = []) {
+
+  if (!adminEmails || adminEmails.length === 0) return;
 
   try {
-    const transporter = nodemailer.createTransport({
-      service: "Gmail",
-      host: "smtp.gmail.com",
-      port: 587, 
-      secure: false, 
-      auth: {
-        user: process.env.GOOGLE_EMAIL,
-        pass: process.env.GOOGLE_APP_PASSWORD, 
-      },
-      tls: {
-        rejectUnauthorized: false 
-      }
-    });
+    const templateParams = {
+      subject: subject,          
+      message: htmlContent,      
+      to_email: adminEmails.join(",") 
+    };
 
-    // Verify connection
-    await transporter.verify();
-    console.log("✅ Kết nối Gmail SMTP thành công!");
+    await emailjs.send(
+      process.env.EMAILJS_SERVICE_ID,
+      process.env.EMAILJS_TEMPLATE_ID,
+      templateParams
+    );
 
-    await transporter.sendMail({
-      from: `"OnePass CMS" <${process.env.GOOGLE_EMAIL}>`,
-      to: adminEmails.join(","),
-      subject,
-      html: message,
-    });
-
-    console.log("📧 Email đã gửi đến admin:", adminEmails);
+    console.log("📧 EmailJS: Đã gửi HTML thành công!");
   } catch (err) {
-    console.error("❌ Lỗi gửi email:", err);
-    // In chi tiết lỗi để debug
-    if (err.code === 'EAUTH') console.log("👉 Kiểm tra lại App Password.");
-    if (err.code === 'ECONNECTION') console.log("👉 Server chặn port 587/465.");
+    console.error("❌ Lỗi EmailJS:", err);
   }
 }
 async function getAdminEmails() {
