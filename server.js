@@ -29,7 +29,7 @@ function translateServiceName(name) {
 
   return map[name?.trim()] || name?.trim() || "";
 }
-import emailjs from '@emailjs/nodejs';
+
 
 // Khởi tạo (giữ nguyên như bước trước)
 emailjs.init({
