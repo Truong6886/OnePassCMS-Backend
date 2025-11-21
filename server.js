@@ -118,12 +118,13 @@ const handleSupabaseError = (error) => {
 const server = http.createServer(app);
 
 // Socket.io configuration - SỬA LẠI
+// Socket.io configuration - CẢI TIẾN ĐỂ NGĂN DISCONNECT
 const io = new Server(server, {
   cors: {
     origin: [
       "https://onepass-gamma.vercel.app",
       "http://localhost:5173",
-      "https://onepasskr.com",
+      "https://www.onepasskr.com",
       "https://b2bonepass.vercel.app",
       "http://localhost:8080",
       "https://onepasscms.vercel.app"
@@ -131,7 +132,85 @@ const io = new Server(server, {
     methods: ["GET", "POST"],
     credentials: true
   },
-  transports: ['websocket', 'polling']
+  transports: ['websocket', 'polling'],
+  pingTimeout: 60000, // Tăng timeout ping lên 60 giây
+  pingInterval: 25000, // Gửi ping mỗi 25 giây
+  allowUpgrades: true,
+  maxHttpBufferSize: 1e8, // Tăng buffer size
+  connectTimeout: 45000 // Tăng timeout kết nối
+});
+
+// Global io reference
+global.io = io;
+
+// Socket.io connection handler với cơ chế giữ kết nối
+io.on("connection", (socket) => {
+  console.log("📡 Client connected:", socket.id);
+  
+  // Bật heartbeat để giữ kết nối
+  socket.conn.on("heartbeat", () => {
+    console.log("Heartbeat received from:", socket.id);
+  });
+
+  // Xử lý sự kiện giữ kết nối
+  socket.on("ping", (data) => {
+    socket.emit("pong", { 
+      timestamp: new Date().toISOString(),
+      message: "Server is alive"
+    });
+  });
+
+  // Gửi ping định kỳ để giữ kết nối
+  const pingInterval = setInterval(() => {
+    if (socket.connected) {
+      socket.emit("ping", { 
+        timestamp: new Date().toISOString() 
+      });
+    }
+  }, 20000); // Gửi ping mỗi 20 giây
+
+  socket.on("disconnect", (reason) => {
+    console.log("❌ Client disconnected:", socket.id, "Reason:", reason);
+    clearInterval(pingInterval); // Dọn dẹp interval khi disconnect
+    
+    // Thử kết nối lại sau 5 giây nếu disconnect không chủ động
+    if (reason === "transport close" || reason === "ping timeout") {
+      console.log("🔄 Attempting to reconnect...");
+      setTimeout(() => {
+        socket.connect();
+      }, 5000);
+    }
+  });
+
+  socket.on("error", (error) => {
+    console.error("Socket error:", error);
+  });
+
+  // Xác nhận kết nối thành công
+  socket.emit("connected", { 
+    message: "Successfully connected to server",
+    socketId: socket.id,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Middleware để xử lý kết nối lại
+io.engine.on("connection", (rawSocket) => {
+  console.log("🔄 Raw connection established");
+  
+  rawSocket.on("close", (reason) => {
+    console.log("🔌 Raw socket closed:", reason);
+  });
+});
+
+// Health check cho Socket.io
+app.get("/api/socket-health", (req, res) => {
+  const connectedClients = io.engine.clientsCount;
+  res.json({
+    success: true,
+    connectedClients,
+    timestamp: new Date().toISOString()
+  });
 });
 global.io = io; 
 // Socket.io connection handler
