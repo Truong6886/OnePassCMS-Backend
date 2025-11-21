@@ -39,19 +39,21 @@ async function sendEmailToAdmin(subject, message, adminEmails = []) {
   try {
     const transporter = nodemailer.createTransport({
       service: "Gmail",
-      host:"smtp.gmail.com",
-      port:465,
-      secure:true,
+      host: "smtp.gmail.com",
+      port: 587, 
+      secure: false, 
       auth: {
         user: process.env.GOOGLE_EMAIL,
-        pass: process.env.GOOGLE_APP_PASSWORD,
+        pass: process.env.GOOGLE_APP_PASSWORD, 
       },
+      tls: {
+        rejectUnauthorized: false 
+      }
     });
 
-    // Thêm kiểm tra kết nối để xác nhận nhanh hơn
+    // Verify connection
     await transporter.verify();
-    console.log("✅ Nodemailer transporter đã sẵn sàng (Port 587)");
-
+    console.log("✅ Kết nối Gmail SMTP thành công!");
 
     await transporter.sendMail({
       from: `"OnePass CMS" <${process.env.GOOGLE_EMAIL}>`,
@@ -63,6 +65,9 @@ async function sendEmailToAdmin(subject, message, adminEmails = []) {
     console.log("📧 Email đã gửi đến admin:", adminEmails);
   } catch (err) {
     console.error("❌ Lỗi gửi email:", err);
+    // In chi tiết lỗi để debug
+    if (err.code === 'EAUTH') console.log("👉 Kiểm tra lại App Password.");
+    if (err.code === 'ECONNECTION') console.log("👉 Server chặn port 587/465.");
   }
 }
 async function getAdminEmails() {
