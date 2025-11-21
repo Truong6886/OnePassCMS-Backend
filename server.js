@@ -32,38 +32,57 @@ function translateServiceName(name) {
 }
 
 const OAuth2 = google.auth.OAuth2;
-  
+
+const oauth2Client = new OAuth2(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET,
+  "https://developers.google.com/oauthplayground" 
+);
+
+oauth2Client.setCredentials({
+  refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
+});
+
 async function sendEmailToAdmin(subject, message, adminEmails = []) {
   if (!adminEmails || adminEmails.length === 0) {
     console.log("⚠️ Không có admin để gửi email");
     return;
   }
 
+  try {
+    const accessToken = await oauth2Client.getAccessToken();
 
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: process.env.GOOGLE_EMAIL,
-      pass: process.env.GOOGLE_APP_PASSWORD, 
-    },
-  });
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        type: "OAuth2",
+        user: process.env.GOOGLE_EMAIL,
+        clientId: process.env.GOOGLE_CLIENT_ID,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        refreshToken: process.env.GOOGLE_REFRESH_TOKEN,
+        accessToken: accessToken.token,
+      },
+    });
 
-  await transporter.sendMail({
-    from: `"OnePass CMS" <${process.env.GOOGLE_EMAIL}>`,
-    to: adminEmails.join(","), 
-    subject,
-    html: message,
-  });
+    await transporter.sendMail({
+      from: `"OnePass CMS" <${process.env.GOOGLE_EMAIL}>`,
+      to: adminEmails.join(","),
+      subject,
+      html: message,
+    });
 
-  console.log("📧 Email đã gửi đến admin:", adminEmails);
+    console.log("📧 Email đã gửi đến admin:", adminEmails);
+  } catch (err) {
+    console.error("❌ Lỗi gửi email:", err);
+  }
 }
-
 
 async function getAdminEmails() {
   const { data, error } = await supabase
     .from("User")
     .select("email")
-    .eq("role", "admin");  
+    .eq("role", "admin");
+
   if (error) {
     console.error("❌ Lỗi lấy email admin:", error);
     return [];
@@ -71,6 +90,8 @@ async function getAdminEmails() {
 
   return data.map((u) => u.email).filter(Boolean);
 }
+
+export { sendEmailToAdmin, getAdminEmails };
 
 
 // ==== Lấy thông tin Supabase ====
@@ -88,7 +109,7 @@ app.use(cors({
   origin: [
     "http://localhost:3000",
     "http://localhost:5173",
-    "https://onepasskr.com", 
+    "https://www.onepasskr.com", 
     "https://b2bonepass.vercel.app",
     "https://onepass-gamma.vercel.app",
     "http://localhost:8080",
