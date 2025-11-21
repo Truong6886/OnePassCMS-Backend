@@ -31,17 +31,7 @@ function translateServiceName(name) {
   return map[name?.trim()] || name?.trim() || "";
 }
 
-const OAuth2 = google.auth.OAuth2;
 
-const oauth2Client = new OAuth2(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET,
-  "https://developers.google.com/oauthplayground" 
-);
-
-oauth2Client.setCredentials({
-  refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
-});
 
 async function sendEmailToAdmin(subject, message, adminEmails = []) {
   if (!adminEmails || adminEmails.length === 0) {
@@ -50,17 +40,19 @@ async function sendEmailToAdmin(subject, message, adminEmails = []) {
   }
 
   try {
-    const accessToken = await oauth2Client.getAccessToken();
+   
 
     const transporter = nodemailer.createTransport({
-      service: "gmail",
+     
+      host: "smtp.gmail.com", 
+      port: 487, 
+     
+      secure: false, 
+      requireTLS: true, 
       auth: {
-        type: "OAuth2",
+       
         user: process.env.GOOGLE_EMAIL,
-        clientId: process.env.GOOGLE_CLIENT_ID,
-        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-        refreshToken: process.env.GOOGLE_REFRESH_TOKEN,
-        accessToken: accessToken.token,
+        pass: process.env.GOOGLE_APP_PASSWORD, 
       },
     });
 
@@ -135,11 +127,10 @@ const handleSupabaseError = (error) => {
   if (error) throw new Error(error.message || "Supabase error");
 };
 
-// ==== Start Server với Socket.io ====
+
 const server = http.createServer(app);
 
-// Socket.io configuration - SỬA LẠI
-// Socket.io configuration - CẢI TIẾN ĐỂ NGĂN DISCONNECT
+
 const io = new Server(server, {
   cors: {
     origin: [
@@ -154,53 +145,49 @@ const io = new Server(server, {
     credentials: true
   },
   transports: ['websocket', 'polling'],
-  pingTimeout: 60000, // Tăng timeout ping lên 60 giây
-  pingInterval: 25000, // Gửi ping mỗi 25 giây
+  pingTimeout: 60000, // Tăng timeout ping lên 60 giây (TỐT)
+  pingInterval: 25000, // Gửi ping mỗi 25 giây (TỐT)
   allowUpgrades: true,
-  maxHttpBufferSize: 1e8, // Tăng buffer size
-  connectTimeout: 45000 // Tăng timeout kết nối
+  maxHttpBufferSize: 1e8,
+  connectTimeout: 45000 
 });
 
-// Global io reference
+
 global.io = io;
 
-// Socket.io connection handler với cơ chế giữ kết nối
+
+io.on("connection", (socket) => {
+  console.log("📡 Client connected:", socket.id);
+  
+ 
+  socket.conn.on("heartbeat", () => {
+  });
+
+  socket.on("disconnect", (reason) => {
+    console.log("❌ Client disconnected:", socket.id, "Reason:", reason);
+    
+  });
+
+  socket.on("error", (error) => {
+    console.error("Socket error:", error);
+  });
+
+
+  socket.emit("connected", { 
+    message: "Successfully connected to server",
+    socketId: socket.id,
+    timestamp: new Date().toISOString()
+  });
+});
+
+
+
 io.on("connection", (socket) => {
   console.log("📡 Client connected:", socket.id);
   
   // Bật heartbeat để giữ kết nối
   socket.conn.on("heartbeat", () => {
     console.log("Heartbeat received from:", socket.id);
-  });
-
-  // Xử lý sự kiện giữ kết nối
-  socket.on("ping", (data) => {
-    socket.emit("pong", { 
-      timestamp: new Date().toISOString(),
-      message: "Server is alive"
-    });
-  });
-
-  // Gửi ping định kỳ để giữ kết nối
-  const pingInterval = setInterval(() => {
-    if (socket.connected) {
-      socket.emit("ping", { 
-        timestamp: new Date().toISOString() 
-      });
-    }
-  }, 20000); // Gửi ping mỗi 20 giây
-
-  socket.on("disconnect", (reason) => {
-    console.log("❌ Client disconnected:", socket.id, "Reason:", reason);
-    clearInterval(pingInterval); // Dọn dẹp interval khi disconnect
-    
-    // Thử kết nối lại sau 5 giây nếu disconnect không chủ động
-    if (reason === "transport close" || reason === "ping timeout") {
-      console.log("🔄 Attempting to reconnect...");
-      setTimeout(() => {
-        socket.connect();
-      }, 5000);
-    }
   });
 
   socket.on("error", (error) => {
