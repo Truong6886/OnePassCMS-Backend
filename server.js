@@ -40,21 +40,32 @@ async function sendEmailToAdmin(subject, message, adminEmails = []) {
   }
 
   try {
-    const msg = {
-      to: adminEmails, 
-      from: process.env.GOOGLE_EMAIL, 
-      subject: subject,
+    const transporter = nodemailer.createTransport({
+      service: "Gmail",
+      host:"smtp.gmail.com",
+      port:465,
+      secure:true,
+      auth: {
+        user: process.env.GOOGLE_EMAIL,
+        pass: process.env.GOOGLE_APP_PASSWORD,
+      },
+    });
+
+    // Thêm kiểm tra kết nối để xác nhận nhanh hơn
+    await transporter.verify();
+    console.log("✅ Nodemailer transporter đã sẵn sàng (Port 587)");
+
+
+    await transporter.sendMail({
+      from: `"OnePass CMS" <${process.env.GOOGLE_EMAIL}>`,
+      to: adminEmails.join(","),
+      subject,
       html: message,
-    };
+    });
 
-    // Gửi mail bằng API
-    await sgMail.send(msg);
-
-    console.log("📧 Email đã gửi đến admin (qua SendGrid API):", adminEmails);
+    console.log("📧 Email đã gửi đến admin:", adminEmails);
   } catch (err) {
-
-    console.error("❌ Lỗi gửi email (SendGrid):", err.message); 
-
+    console.error("❌ Lỗi gửi email:", err);
   }
 }
 async function getAdminEmails() {
