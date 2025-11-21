@@ -11,7 +11,7 @@ import { PDFDocument, rgb } from "pdf-lib";
 import fetch from "node-fetch";
 import nodemailer from "nodemailer";
 import { google } from "googleapis";
-
+import sgMail from '@sendgrid/mail';
 dotenv.config();
 
 function translateServiceName(name) {
@@ -32,7 +32,7 @@ function translateServiceName(name) {
 }
 
 
-
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 async function sendEmailToAdmin(subject, message, adminEmails = []) {
   if (!adminEmails || adminEmails.length === 0) {
     console.log("⚠️ Không có admin để gửi email");
@@ -40,29 +40,21 @@ async function sendEmailToAdmin(subject, message, adminEmails = []) {
   }
 
   try {
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.GOOGLE_EMAIL,
-        pass: process.env.GOOGLE_APP_PASSWORD,
-      },
-    });
-
-    // Thêm kiểm tra kết nối để xác nhận nhanh hơn
-    await transporter.verify();
-    console.log("✅ Nodemailer transporter đã sẵn sàng (Port 587)");
-
-
-    await transporter.sendMail({
-      from: `"OnePass CMS" <${process.env.GOOGLE_EMAIL}>`,
-      to: adminEmails.join(","),
-      subject,
+    const msg = {
+      to: adminEmails, 
+      from: process.env.GOOGLE_EMAIL, 
+      subject: subject,
       html: message,
-    });
+    };
 
-    console.log("📧 Email đã gửi đến admin:", adminEmails);
+    // Gửi mail bằng API
+    await sgMail.send(msg);
+
+    console.log("📧 Email đã gửi đến admin (qua SendGrid API):", adminEmails);
   } catch (err) {
-    console.error("❌ Lỗi gửi email:", err);
+
+    console.error("❌ Lỗi gửi email (SendGrid):", err.message); 
+
   }
 }
 async function getAdminEmails() {
