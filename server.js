@@ -10,8 +10,7 @@ import dotenv from "dotenv";
 import { PDFDocument, rgb } from "pdf-lib";
 import fetch from "node-fetch";
 import nodemailer from "nodemailer";
-import { google } from "googleapis";
-import sgMail from '@sendgrid/mail';
+
 dotenv.config();
 
 function translateServiceName(name) {
@@ -31,8 +30,6 @@ function translateServiceName(name) {
   return map[name?.trim()] || name?.trim() || "";
 }
 
-
-sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 async function sendEmailToAdmin(subject, message, adminEmails = []) {
   if (!adminEmails || adminEmails.length === 0) {
     console.log("⚠️ Không có admin để gửi email");
