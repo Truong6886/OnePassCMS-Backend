@@ -866,7 +866,7 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
     const doanhThuSauCK = (DoanhThuTruocCK || 0) - tienChietKhau;
 
     const { data, error } = await supabase
-      .from("B2B_APPROVED_SERVICES")
+      .from("B2B_SERVICES")
       .update({
         TenDichVu,
         NgayThucHien: NgayThucHien || null,
