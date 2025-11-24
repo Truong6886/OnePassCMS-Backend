@@ -877,8 +877,7 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
         MucChietKhau: MucChietKhau || 0,
         SoTienChietKhau: tienChietKhau, 
         DoanhThuSauChietKhau: doanhThuSauCK,
-        
-        NgayCapNhat: new Date().toISOString(),
+    
       })
       .eq("ID", id)
       .select()
