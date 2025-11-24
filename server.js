@@ -29,7 +29,7 @@ function translateServiceName(name) {
 
   return map[name?.trim()] || name?.trim() || "";
 }
-import emailjs from '@emailjs/nodejs';
+
 
 // Khởi tạo (giữ nguyên như bước trước)
 emailjs.init({
@@ -39,22 +39,36 @@ emailjs.init({
 
 async function sendEmailToAdmin(subject, htmlContent, adminEmails = []) {
 
-  if (!adminEmails || adminEmails.length === 0) return;
+  if (!adminEmails || adminEmails.length === 0) {
+    console.log("⚠️ Không có admin để gửi email");
+    return;
+  }
 
   try {
-    const templateParams = {
-      subject: subject,          
-      message: htmlContent,      
-      to_email: adminEmails.join(",") 
-    };
+    const sendPromises = adminEmails.map((email) => {
+      const templateParams = {
+        subject: subject,
+        message: htmlContent,
+        to_email: email,
+        name: "OnePass System",
+        reply_to: "no-reply@onepass.com"
+      };
 
-    await emailjs.send(
-      process.env.EMAILJS_SERVICE_ID,
-      process.env.EMAILJS_TEMPLATE_ID,
-      templateParams
-    );
+      return emailjs.send(
+        process.env.EMAILJS_SERVICE_ID,
+        process.env.EMAILJS_TEMPLATE_ID,
+        templateParams,
+        {
+          publicKey: process.env.EMAILJS_PUBLIC_KEY,
+          privateKey: process.env.EMAILJS_PRIVATE_KEY,
+        }
+      );
+    });
 
-    console.log("📧 EmailJS: Đã gửi HTML thành công!");
+    // CHỜ TẤT CẢ GỬI XONG
+    await Promise.all(sendPromises);
+
+    console.log("📧 EmailJS: Đã gửi thành công tới tất cả admin:", adminEmails);
   } catch (err) {
     console.error("❌ Lỗi EmailJS:", err);
   }
