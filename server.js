@@ -847,50 +847,64 @@ app.post("/api/b2b/services", async (req, res) => {
 });
 
 
+// SỬA LẠI: Cập nhật bảng B2B_SERVICES (Dùng STT làm khóa chính)
 app.put("/api/b2b/services/update/:id", async (req, res) => {
   try {
-    const { id } = req.params;
+    const { id } = req.params; // Đây là giá trị STT từ frontend gửi lên
 
+    // Lấy dữ liệu từ Client gửi lên
     const {
+      LoaiDichVu,
       TenDichVu,
+      MaDichVu,
       NgayThucHien,
       NgayHoanThanh,
-      DoanhThuTruocCK,
-      MucChietKhau
+      DoanhThuTruocCK, 
+      DoanhThuTruocChietKhau, // Frontend có thể gửi 1 trong 2 key này
+      MucChietKhau,
+      SoTienChietKhau,
+      DoanhThuSauChietKhau,
+      TongDoanhThuTichLuy
     } = req.body;
 
-    console.log("📌 Update service ID:", id); 
+    console.log("📌 Update B2B_SERVICES (STT):", id, req.body);
 
-    // Tính toán
-    const tienChietKhau = Math.round((DoanhThuTruocCK || 0) * (MucChietKhau || 0) / 100);
-    const doanhThuSauCK = (DoanhThuTruocCK || 0) - tienChietKhau;
+    // Lấy giá trị doanh thu trước (ưu tiên key nào có dữ liệu)
+    const finalRevenueBefore = DoanhThuTruocChietKhau || DoanhThuTruocCK || 0;
 
+    // Tính toán lại (để đảm bảo dữ liệu nhất quán)
+    const tienChietKhau = Math.round((finalRevenueBefore * (MucChietKhau || 0)) / 100);
+    const doanhThuSauCK = finalRevenueBefore - tienChietKhau;
+
+    // Cập nhật vào bảng B2B_SERVICES
     const { data, error } = await supabase
-      .from("B2B_SERVICES")
+      .from("B2B_SERVICES") 
       .update({
+        LoaiDichVu,
         TenDichVu,
+        ServiceID: MaDichVu, // Mapping: Frontend gửi MaDichVu -> DB lưu ServiceID
         NgayThucHien: NgayThucHien || null,
         NgayHoanThanh: NgayHoanThanh || null,
         
-        // Mapping tên cột chuẩn xác
-        DoanhThuTruocChietKhau: DoanhThuTruocCK, 
+        // Mapping tên cột trong DB
+        DoanhThuTruocChietKhau: finalRevenueBefore,
         MucChietKhau: MucChietKhau || 0,
         SoTienChietKhau: tienChietKhau, 
         DoanhThuSauChietKhau: doanhThuSauCK,
-    
+        TongDoanhThuTichLuy: TongDoanhThuTichLuy || 0
+     
       })
-      .eq("ID", id)
+      .eq("STT", id) 
       .select()
-      .maybeSingle(); 
+      .maybeSingle();
 
     if (error) throw error;
 
-  
     if (!data) {
-      console.error(`❌ Không tìm thấy dịch vụ có ID = ${id} trong bảng B2B_APPROVED_SERVICES`);
+      console.error(`❌ Không tìm thấy dịch vụ có STT = ${id}`);
       return res.status(404).json({ 
         success: false, 
-        message: "Không tìm thấy dịch vụ này (ID sai hoặc đã bị xóa)." 
+        message: "Không tìm thấy dịch vụ này (STT sai hoặc đã bị xóa)." 
       });
     }
 
@@ -900,7 +914,6 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-
 app.post("/api/b2b/update", async (req, res) => {
   try {
     const { 
