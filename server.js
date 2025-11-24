@@ -29,7 +29,7 @@ function translateServiceName(name) {
 
   return map[name?.trim()] || name?.trim() || "";
 }
-
+import emailjs from '@emailjs/nodejs';
 
 // Khởi tạo (giữ nguyên như bước trước)
 emailjs.init({
@@ -39,36 +39,22 @@ emailjs.init({
 
 async function sendEmailToAdmin(subject, htmlContent, adminEmails = []) {
 
-  if (!adminEmails || adminEmails.length === 0) {
-    console.log("⚠️ Không có admin để gửi email");
-    return;
-  }
+  if (!adminEmails || adminEmails.length === 0) return;
 
   try {
-    const sendPromises = adminEmails.map((email) => {
-      const templateParams = {
-        subject: subject,
-        message: htmlContent,
-        to_email: email,
-        name: "OnePass System",
-        reply_to: "no-reply@onepass.com"
-      };
+    const templateParams = {
+      subject: subject,          
+      message: htmlContent,      
+      to_email: adminEmails.join(",") 
+    };
 
-      return emailjs.send(
-        process.env.EMAILJS_SERVICE_ID,
-        process.env.EMAILJS_TEMPLATE_ID,
-        templateParams,
-        {
-          publicKey: process.env.EMAILJS_PUBLIC_KEY,
-          privateKey: process.env.EMAILJS_PRIVATE_KEY,
-        }
-      );
-    });
+    await emailjs.send(
+      process.env.EMAILJS_SERVICE_ID,
+      process.env.EMAILJS_TEMPLATE_ID,
+      templateParams
+    );
 
-    // CHỜ TẤT CẢ GỬI XONG
-    await Promise.all(sendPromises);
-
-    console.log("📧 EmailJS: Đã gửi thành công tới tất cả admin:", adminEmails);
+    console.log("📧 EmailJS: Đã gửi HTML thành công!");
   } catch (err) {
     console.error("❌ Lỗi EmailJS:", err);
   }
@@ -745,30 +731,20 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
     });
   }
 });
-// File: server.js
-
 app.get("/api/b2b/services", async (req, res) => {
   try {
-    // 1. Thêm DoanhNghiepID vào destructuring
-    const { page, limit, DoanhNghiepID } = req.query; 
+    const { page, limit } = req.query;
     
     const pageNum = parseInt(page) || 1;
     const limitNum = parseInt(limit) || 20;
     const from = (pageNum - 1) * limitNum;
     const to = from + limitNum - 1;
 
-   
-    let query = supabase
+    const { data, count, error } = await supabase
       .from("B2B_SERVICES")
       .select("*", { count: "exact" })
       .order("STT", { ascending: false })
       .range(from, to);
-
-    if (DoanhNghiepID) {
-      query = query.eq("DoanhNghiepID", DoanhNghiepID);
-    }
-
-    const { data, count, error } = await query;
 
     if (error) throw error;
 
