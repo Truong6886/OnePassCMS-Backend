@@ -791,7 +791,34 @@ app.get("/api/b2b/services", async (req, res) => {
   }
 });
 
+app.get("/api/b2b/services/wallet", async (req, res) => {
+  try {
+    const { userId } = req.query; 
 
+    if (!userId) {
+      return res.status(400).json({ success: false, message: "Thiếu userId" });
+    }
+
+    const { data, error } = await supabase
+      .from("B2B_SERVICES")
+      .select("SoDuVi")
+      .eq("DoanhNghiepID", userId)
+      .order("STT", { ascending: false }) 
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+
+  
+    const currentBalance = data?.SoDuVi ?? 2000000; 
+
+    res.json({ success: true, SoDuVi: currentBalance });
+
+  } catch (err) {
+    console.error("❌ Lỗi lấy số dư ví:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 app.post("/api/b2b/services", async (req, res) => {
   try {
     const {
