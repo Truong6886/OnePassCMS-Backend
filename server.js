@@ -774,7 +774,8 @@ app.get("/api/b2b/services", async (req, res) => {
       MucChietKhau: item.MucChietKhau,
       SoTienChietKhau: item.SoTienChietKhau,
       DoanhThuSauChietKhau: item.DoanhThuSauChietKhau,
-      TongDoanhThuTichLuy: item.TongDoanhThuTichLuy
+      TongDoanhThuTichLuy: item.TongDoanhThuTichLuy,
+      Vi: item.Vi
     }));
 
     res.json({
@@ -805,7 +806,8 @@ app.post("/api/b2b/services", async (req, res) => {
       MucChietKhau,
       SoTienChietKhau,
       DoanhThuSauChietKhau,
-      TongDoanhThuTichLuy
+      TongDoanhThuTichLuy,
+      Vi
     } = req.body;
 
     if (!DoanhNghiepID || !LoaiDichVu) {
@@ -826,6 +828,7 @@ app.post("/api/b2b/services", async (req, res) => {
           SoTienChietKhau,
           DoanhThuSauChietKhau,
           TongDoanhThuTichLuy,
+          Vi: Vi ,
           CreatedAt: new Date().toISOString()
         }
       ])
