@@ -775,7 +775,8 @@ app.get("/api/b2b/services", async (req, res) => {
       SoTienChietKhau: item.SoTienChietKhau,
       DoanhThuSauChietKhau: item.DoanhThuSauChietKhau,
       TongDoanhThuTichLuy: item.TongDoanhThuTichLuy,
-      Vi: item.Vi
+      Vi: item.Vi,
+      Hang: item.Hang,
     }));
 
     res.json({
