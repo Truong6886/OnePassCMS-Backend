@@ -747,16 +747,24 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
 });
 app.get("/api/b2b/services", async (req, res) => {
   try {
-    const { page, limit } = req.query;
+    
+    const { page, limit, DoanhNghiepID } = req.query;
     
     const pageNum = parseInt(page) || 1;
     const limitNum = parseInt(limit) || 20;
     const from = (pageNum - 1) * limitNum;
     const to = from + limitNum - 1;
 
-    const { data, count, error } = await supabase
+    let query = supabase
       .from("B2B_SERVICES")
-      .select("*", { count: "exact" })
+      .select("*", { count: "exact" });
+
+  
+    if (DoanhNghiepID) {
+      query = query.eq("DoanhNghiepID", DoanhNghiepID);
+    }
+
+    const { data, count, error } = await query
       .order("STT", { ascending: false })
       .range(from, to);
 
