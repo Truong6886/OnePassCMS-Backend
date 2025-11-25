@@ -795,7 +795,6 @@ app.get("/api/b2b/services", async (req, res) => {
 
 app.post("/api/b2b/services", async (req, res) => {
   try {
-    
     const {
       DoanhNghiepID,
       LoaiDichVu,   
@@ -810,17 +809,36 @@ app.post("/api/b2b/services", async (req, res) => {
       Vi
     } = req.body;
 
-    if (!DoanhNghiepID || !LoaiDichVu) {
+    if (!DoanhNghiepID || !LoaiDichVu || Vi == null) {
       return res.status(400).json({ success: false, message: "Thiếu thông tin bắt buộc" });
     }
 
+    // 1. Lấy SoDuVi gốc từ bảng B2B_SERVICES
+    const { data: serviceData, error: fetchError } = await supabase
+      .from("B2B_SERVICES")
+      .select("SoDuVi")
+      .eq("DoanhNghiepID", DoanhNghiepID)
+      .order("STT", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (fetchError) throw fetchError;
+
+    const SoDuViGoc = serviceData?.SoDuVi ?? 2000000; // Nếu chưa có, dùng default 2tr
+    const SoDuViMoi = SoDuViGoc - Vi;
+
+    if (SoDuViMoi < 0) {
+      return res.status(400).json({ success: false, message: "Số dư ví không đủ" });
+    }
+
+    // 2. Lưu dịch vụ mới với Vi và SoDuVi mới
     const { data, error } = await supabase
       .from("B2B_SERVICES")
       .insert([
         {
           DoanhNghiepID,
           LoaiDichVu,
-          ServiceID: MaDichVu, 
+          ServiceID: MaDichVu,
           NgayThucHien: NgayThucHien || null,
           NgayHoanThanh: NgayHoanThanh || null,
           DoanhThuTruocChietKhau,
@@ -828,7 +846,8 @@ app.post("/api/b2b/services", async (req, res) => {
           SoTienChietKhau,
           DoanhThuSauChietKhau,
           TongDoanhThuTichLuy,
-          Vi: Vi ,
+          Vi,
+          SoDuVi: SoDuViMoi,
           CreatedAt: new Date().toISOString()
         }
       ])
@@ -837,10 +856,9 @@ app.post("/api/b2b/services", async (req, res) => {
 
     if (error) throw error;
 
-
-    res.json({ 
-      success: true, 
-      data: { ...data, ID: data.STT } 
+    res.json({
+      success: true,
+      data: { ...data, ID: data.STT, SoDuViGoc, SoDuViMoi }
     });
 
   } catch (err) {
@@ -850,77 +868,82 @@ app.post("/api/b2b/services", async (req, res) => {
 });
 
 
-// SỬA LẠI: Cập nhật bảng B2B_SERVICES (Dùng STT làm khóa chính)
-app.put("/api/b2b/services/update/:id", async (req, res) => {
-  try {
-    const { id } = req.params; // Đây là STT từ frontend gửi lên
 
-    // Lấy dữ liệu từ Client gửi lên
+
+app.post("/api/b2b/services", async (req, res) => {
+  try {
     const {
-      LoaiDichVu,
-      TenDichVu,
-      MaDichVu,
-      NgayThucHien,        // Ngày bắt đầu
-      NgayHoanThanh,       // Ngày kết thúc
-      DoanhThuTruocCK, 
-      DoanhThuTruocChietKhau, 
+      DoanhNghiepID,
+      LoaiDichVu,   
+      MaDichVu,   
+      NgayThucHien,
+      NgayHoanThanh,
+      DoanhThuTruocChietKhau,
       MucChietKhau,
       SoTienChietKhau,
       DoanhThuSauChietKhau,
-      TongDoanhThuTichLuy
+      TongDoanhThuTichLuy,
+      Vi
     } = req.body;
 
-    console.log("📌 Update B2B_SERVICES (STT):", id, req.body);
+    if (!DoanhNghiepID || !LoaiDichVu || Vi == null) {
+      return res.status(400).json({ success: false, message: "Thiếu thông tin bắt buộc" });
+    }
 
-    // 1. Xử lý Doanh Thu Trước Chiết Khấu (Ưu tiên giá trị frontend gửi)
-    const finalRevenueBefore = DoanhThuTruocChietKhau !== undefined ? DoanhThuTruocChietKhau : (DoanhThuTruocCK || 0);
+    // 1. Lấy SoDuVi gốc từ bảng B2B_SERVICES
+    const { data: serviceData, error: fetchError } = await supabase
+      .from("B2B_SERVICES")
+      .select("SoDuVi")
+      .eq("DoanhNghiepID", DoanhNghiepID)
+      .order("STT", { ascending: false })
+      .limit(1)
+      .single();
 
-    // 2. Tính toán lại các chỉ số tài chính (Server tự tính để đảm bảo chính xác)
-    const rate = MucChietKhau || 0;
-    const discountAmt = Math.round((finalRevenueBefore * rate) / 100);
-    const revenueAfter = finalRevenueBefore - discountAmt;
+    if (fetchError) throw fetchError;
 
-    // 3. Cập nhật vào bảng B2B_SERVICES
+    const SoDuViGoc = serviceData?.SoDuVi ?? 2000000; // Nếu chưa có, dùng default 2tr
+    const SoDuViMoi = SoDuViGoc - Vi;
+
+    if (SoDuViMoi < 0) {
+      return res.status(400).json({ success: false, message: "Số dư ví không đủ" });
+    }
+
+    // 2. Lưu dịch vụ mới với Vi và SoDuVi mới
     const { data, error } = await supabase
-      .from("B2B_SERVICES") // 👈 Đảm bảo đúng tên bảng
-      .update({
-        LoaiDichVu,
-        TenDichVu,
-        ServiceID: MaDichVu, // Mapping MaDichVu -> ServiceID
-        
-        // Cập nhật ngày tháng (Cho phép null nếu rỗng)
-        NgayThucHien: NgayThucHien || null,
-        NgayHoanThanh: NgayHoanThanh || null,
-        
-        // Cập nhật số liệu tài chính
-        DoanhThuTruocChietKhau: finalRevenueBefore,
-        MucChietKhau: rate,
-        SoTienChietKhau: discountAmt, 
-        DoanhThuSauChietKhau: revenueAfter,
-        TongDoanhThuTichLuy: TongDoanhThuTichLuy || 0,
-        
-        // Nếu bảng có cột ngày cập nhật
-        // NgayCapNhat: new Date().toISOString() 
-      })
-      .eq("STT", id) // 👈 Dùng STT làm điều kiện update
+      .from("B2B_SERVICES")
+      .insert([
+        {
+          DoanhNghiepID,
+          LoaiDichVu,
+          ServiceID: MaDichVu,
+          NgayThucHien: NgayThucHien || null,
+          NgayHoanThanh: NgayHoanThanh || null,
+          DoanhThuTruocChietKhau,
+          MucChietKhau,
+          SoTienChietKhau,
+          DoanhThuSauChietKhau,
+          TongDoanhThuTichLuy,
+          Vi,
+          SoDuVi: SoDuViMoi,
+          CreatedAt: new Date().toISOString()
+        }
+      ])
       .select()
-      .maybeSingle();
+      .single();
 
     if (error) throw error;
 
-    if (!data) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Không tìm thấy dịch vụ (STT sai hoặc đã bị xóa)." 
-      });
-    }
+    res.json({
+      success: true,
+      data: { ...data, ID: data.STT, SoDuViGoc, SoDuViMoi }
+    });
 
-    return res.json({ success: true, data });
   } catch (err) {
-    console.error("❌ Lỗi update service:", err);
+    console.error("❌ Lỗi thêm B2B_SERVICES:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
 app.post("/api/b2b/update", async (req, res) => {
   try {
     const { 
