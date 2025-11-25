@@ -792,7 +792,6 @@ app.get("/api/b2b/services", async (req, res) => {
 });
 
 
-
 app.post("/api/b2b/services", async (req, res) => {
   try {
     const {
@@ -870,76 +869,65 @@ app.post("/api/b2b/services", async (req, res) => {
 
 
 
-app.post("/api/b2b/services", async (req, res) => {
+app.put("/api/b2b/services/update/:id", async (req, res) => {
   try {
+    const { id } = req.params; // STT
     const {
-      DoanhNghiepID,
-      LoaiDichVu,   
-      MaDichVu,   
+      LoaiDichVu,
+      TenDichVu,
+      MaDichVu,
       NgayThucHien,
       NgayHoanThanh,
       DoanhThuTruocChietKhau,
       MucChietKhau,
-      SoTienChietKhau,
-      DoanhThuSauChietKhau,
-      TongDoanhThuTichLuy,
-      Vi
+      Vi // Nhập ví mới từ client
     } = req.body;
 
-    if (!DoanhNghiepID || !LoaiDichVu || Vi == null) {
-      return res.status(400).json({ success: false, message: "Thiếu thông tin bắt buộc" });
+    if (Vi == null) {
+      return res.status(400).json({ success: false, message: "Thiếu thông tin Vi" });
     }
 
-    // 1. Lấy SoDuVi gốc từ bảng B2B_SERVICES
-    const { data: serviceData, error: fetchError } = await supabase
+    // Lấy dịch vụ hiện tại để biết DoanhNghiepID và SoDuVi gốc
+    const { data: currentService, error: fetchError } = await supabase
       .from("B2B_SERVICES")
-      .select("SoDuVi")
-      .eq("DoanhNghiepID", DoanhNghiepID)
-      .order("STT", { ascending: false })
-      .limit(1)
+      .select("DoanhNghiepID, SoDuVi")
+      .eq("STT", id)
       .single();
-
     if (fetchError) throw fetchError;
 
-    const SoDuViGoc = serviceData?.SoDuVi ?? 2000000; // Nếu chưa có, dùng default 2tr
+    const SoDuViGoc = currentService?.SoDuVi ?? 2000000;
     const SoDuViMoi = SoDuViGoc - Vi;
 
     if (SoDuViMoi < 0) {
       return res.status(400).json({ success: false, message: "Số dư ví không đủ" });
     }
 
-    // 2. Lưu dịch vụ mới với Vi và SoDuVi mới
+    // Cập nhật dịch vụ
     const { data, error } = await supabase
       .from("B2B_SERVICES")
-      .insert([
-        {
-          DoanhNghiepID,
-          LoaiDichVu,
-          ServiceID: MaDichVu,
-          NgayThucHien: NgayThucHien || null,
-          NgayHoanThanh: NgayHoanThanh || null,
-          DoanhThuTruocChietKhau,
-          MucChietKhau,
-          SoTienChietKhau,
-          DoanhThuSauChietKhau,
-          TongDoanhThuTichLuy,
-          Vi,
-          SoDuVi: SoDuViMoi,
-          CreatedAt: new Date().toISOString()
-        }
-      ])
+      .update({
+        LoaiDichVu,
+        TenDichVu,
+        ServiceID: MaDichVu,
+        NgayThucHien: NgayThucHien || null,
+        NgayHoanThanh: NgayHoanThanh || null,
+        Vi,
+        SoDuVi: SoDuViMoi,
+        DoanhThuTruocChietKhau,
+        MucChietKhau,
+        SoTienChietKhau: Math.round((DoanhThuTruocChietKhau * (MucChietKhau || 0)) / 100),
+        DoanhThuSauChietKhau: DoanhThuTruocChietKhau - Math.round((DoanhThuTruocChietKhau * (MucChietKhau || 0)) / 100)
+      })
+      .eq("STT", id)
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) throw error;
 
-    res.json({
-      success: true,
-      data: { ...data, ID: data.STT, SoDuViGoc, SoDuViMoi }
-    });
+    res.json({ success: true, data });
 
   } catch (err) {
-    console.error("❌ Lỗi thêm B2B_SERVICES:", err);
+    console.error("❌ Lỗi update B2B_SERVICES:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
