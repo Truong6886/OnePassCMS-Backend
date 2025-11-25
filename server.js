@@ -791,28 +791,31 @@ app.get("/api/b2b/services", async (req, res) => {
   }
 });
 
+// ✅ API: Lấy số dư ví và Hạng hiện tại của doanh nghiệp
 app.get("/api/b2b/services/wallet", async (req, res) => {
   try {
-    const { userId } = req.query; 
+    const { userId } = req.query;
 
     if (!userId) {
       return res.status(400).json({ success: false, message: "Thiếu userId" });
     }
 
+    // SỬA: Thêm "Hang" vào select
     const { data, error } = await supabase
       .from("B2B_SERVICES")
-      .select("SoDuVi")
+      .select("SoDuVi, Hang") 
       .eq("DoanhNghiepID", userId)
-      .order("STT", { ascending: false }) 
+      .order("STT", { ascending: false })
       .limit(1)
       .maybeSingle();
 
     if (error) throw error;
 
-  
-    const currentBalance = data?.SoDuVi ?? 2000000; 
+    const currentBalance = data?.SoDuVi ?? 2000000;
+    const currentRank = data?.Hang || "New-bie"; 
 
-    res.json({ success: true, SoDuVi: currentBalance });
+    // SỬA: Trả về thêm Hang
+    res.json({ success: true, SoDuVi: currentBalance, Hang: currentRank });
 
   } catch (err) {
     console.error("❌ Lỗi lấy số dư ví:", err);
