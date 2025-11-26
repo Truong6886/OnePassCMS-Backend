@@ -623,7 +623,7 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
           </div>
 
           <div style="margin-top: 25px; text-align: center;">
-            <a href="https://onepasscms.vercel.app"
+            <a href="https://onepasscms.vercel.app/B2B"
               style="
                 background: #2C4D9E;
                 color: white;
