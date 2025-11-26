@@ -533,8 +533,7 @@ app.put("/api/b2b/pending/:id", async (req, res) => {
         NguoiDaiDien: NguoiDaiDien?.trim() || "",
         DichVu: DichVu?.trim() || "",
         DichVuKhac: DichVuKhac?.trim() || "",
-        PdfPath: PdfPath || null,
-        NgayCapNhat: new Date().toISOString()
+        PdfPath: PdfPath || null
       })
       .eq("ID", id)
       .select()
