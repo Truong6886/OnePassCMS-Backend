@@ -60,7 +60,33 @@ emailjs.init({
   publicKey: process.env.EMAILJS_PUBLIC_KEY,
   privateKey: process.env.EMAILJS_PRIVATE_KEY,
 });
+async function sendEmailToCustomer(toEmail, subject, htmlContent) {
+  if (!toEmail) return;
 
+  try {
+    const templateParams = {
+      subject: subject,
+      message: htmlContent,
+      to_email: toEmail, 
+      name: "OnePass Customer",
+      reply_to: "support@onepass.com"
+    };
+
+    await emailjs.send(
+      process.env.EMAILJS_SERVICE_ID,
+      process.env.EMAILJS_TEMPLATE_ID,
+      templateParams,
+      {
+        publicKey: process.env.EMAILJS_PUBLIC_KEY,
+        privateKey: process.env.EMAILJS_PRIVATE_KEY,
+      }
+    );
+
+    console.log("📧 Email xác nhận đã gửi đến khách hàng:", toEmail);
+  } catch (err) {
+    console.error("❌ Lỗi gửi email khách hàng:", err);
+  }
+}
 async function sendEmailToAdmin(subject, htmlContent, adminEmails = []) {
 
   if (!adminEmails || adminEmails.length === 0) {
@@ -427,41 +453,11 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
       NganhNgheChinh 
     } = req.body;
 
-    if (!TenDoanhNghiep || !SoDKKD || !Email || !MatKhau) {
-      return res.status(400).json({
-        success: false,
-        message: "Thiếu dữ liệu bắt buộc"
-      });
-    }
-
-    let PdfPath = null;
-
-   
-    if (req.file) {
-      const fileName = `b2b_${Date.now()}_${req.file.originalname}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("b2b_pdf")
-        .upload(fileName, req.file.buffer, {
-          contentType: "application/pdf",
-          upsert: true
-        });
-
-      if (uploadError) {
-        console.error("❌ Lỗi upload PDF:", uploadError);
-        throw uploadError;
-      }
-
-      // Lấy public URL
-      const { data: publicUrl } = supabase.storage
-        .from("b2b_pdf")
-        .getPublicUrl(fileName);
-
-      PdfPath = publicUrl.publicUrl;
-    }
+    
 
     const hashedPassword = await bcrypt.hash(MatKhau, 10);
 
+    // Insert vào DB
     const { data, error } = await supabase
       .from("B2B_PENDING")
       .insert([
@@ -481,6 +477,55 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
       .select();
 
     if (error) throw error;
+
+  
+    try {
+      const emailContent = `
+        <div style="
+          max-width: 600px;
+          margin: auto;
+          padding: 20px;
+          font-family: Arial, sans-serif;
+          border: 1px solid #e0e0e0;
+          border-radius: 8px;
+          background-color: #ffffff;
+        ">
+          <h2 style="color: #2C4D9E; text-align: center; border-bottom: 2px solid #2C4D9E; padding-bottom: 10px;">
+            Đăng ký tài khoản B2B thành công
+          </h2>
+          
+          <p>Xin chào <strong>${TenDoanhNghiep}</strong>,</p>
+          
+          <p>Cảm ơn Quý doanh nghiệp đã đăng ký trở thành đối tác B2B của OnePass.</p>
+          
+          <div style="background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 15px 0;">
+            <p style="margin: 5px 0;"><strong>Mã số thuế/ĐKKD:</strong> ${SoDKKD}</p>
+            <p style="margin: 5px 0;"><strong>Người đại diện:</strong> ${NguoiDaiDien}</p>
+            <p style="margin: 5px 0;"><strong>Email đăng ký:</strong> ${Email}</p>
+          </div>
+
+          <p>Hồ sơ của Quý khách hiện đang ở trạng thái <strong>Chờ phê duyệt</strong>. Bộ phận quản lý của OnePass sẽ kiểm tra và kích hoạt tài khoản trong thời gian sớm nhất.</p>
+          
+          <p>Quý khách sẽ nhận được email thông báo ngay khi tài khoản được kích hoạt.</p>
+
+          <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+          
+          <p style="text-align: center; font-size: 12px; color: #888;">
+            Trân trọng,<br>
+            Đội ngũ OnePass
+          </p>
+        </div>
+      `;
+
+      await sendEmailToCustomer(Email, "OnePass - Xác nhận đăng ký B2B", emailContent);
+      
+    
+      
+    } catch (mailError) {
+      console.error("⚠️ Không thể gửi email xác nhận:", mailError);
+  
+    }
+    // -----------------------------------------------------------
 
     res.json({ success: true, message: "Đăng ký thành công", data: data[0] });
   } catch (err) {
@@ -1084,50 +1129,7 @@ app.get("/api/b2b/approved-with-services", async (req, res) => {
   }
 });
 
-// app.put("/api/b2b/services/update/:id", async (req, res) => {
-//   try {
-//     const { id } = req.params;
-//     // Lấy dữ liệu từ Client gửi lên
-//     const {
-//       TenDichVu,
-//       NgayThucHien,
-//       NgayHoanThanh,
-//       DoanhThuTruocCK, 
-//       MucChietKhau
-//     } = req.body;
 
-//     console.log("📌 Update service:", id, req.body);
-
-//     // Tính toán
-//     const tienChietKhau = Math.round((DoanhThuTruocCK || 0) * (MucChietKhau || 0) / 100);
-//     const doanhThuSauCK = (DoanhThuTruocCK || 0) - tienChietKhau;
-
-//     const { data, error } = await supabase
-//       .from("B2B_APPROVED_SERVICES")
-//       .update({
-//         TenDichVu,
-//         NgayThucHien,
-//         NgayHoanThanh,
-       
-//         DoanhThuTruocChietKhau: DoanhThuTruocCK, 
-//         MucChietKhau,
-//         SoTienChietKhau: tienChietKhau,    
-//         DoanhThuSauChietKhau: doanhThuSauCK,
-        
-//         NgayCapNhat: new Date().toISOString(),
-//       })
-//       .eq("ID", id)
-//       .select()
-//       .single();
-
-//     if (error) throw error;
-
-//     return res.json({ success: true, data });
-//   } catch (err) {
-//     console.error("❌ Lỗi update service:", err);
-//     res.status(500).json({ success: false, message: err.message });
-//   }
-// });
 app.get("/api/b2b/approved", async (req, res) => {
   try {
     const { SoDKKD, page, limit } = req.query;
