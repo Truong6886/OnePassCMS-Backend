@@ -248,7 +248,7 @@ app.get("/api/socket-health", (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
-global.io = io; 
+
 // Socket.io connection handler
 io.on("connection", (socket) => {
   console.log("📡 Client connected:", socket.id);
@@ -908,7 +908,6 @@ app.post("/api/b2b/services", async (req, res) => {
         DoanhThuSauChietKhau,
         Vi,
         SoDuViSauKhiTru: SoDuMoi,
-        Hang: hang,
         CreatedAt: new Date().toISOString()
       }])
       .select()
@@ -1002,7 +1001,6 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
         MucChietKhau: chietKhau,
         SoTienChietKhau,
         DoanhThuSauChietKhau,
-        Hang: hang,
         UpdatedAt: new Date().toISOString()
       })
       .eq("STT", id)
@@ -1503,7 +1501,6 @@ app.get("/api/pdf-signature/:mahoso", async (req, res) => {
 
 
 app.set("socketio", io);
-global.io = io; 
 
 // ==== ROUTES ====
 
