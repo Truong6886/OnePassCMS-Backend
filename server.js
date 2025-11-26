@@ -518,7 +518,7 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
       global.io.emit("new_request", notificationPayload);
     }
     try {
-     const emailContent = `
+    const emailContent = `
         <div style="
           max-width: 600px;
           margin: auto;
@@ -528,22 +528,24 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
           border-radius: 10px;
           background: #ffffff;
         ">
-          <h2 style="
-            color: #2C4D9E;
-            text-align: center;
-            margin-bottom: 20px;
-            border-bottom: 2px solid #2C4D9E;
-            padding-bottom: 10px;
-          ">
-            Đăng ký tài khoản B2B thành công
-          </h2>
+          <div style="text-align: center; border-bottom: 2px solid #2C4D9E; padding-bottom: 15px; margin-bottom: 20px;">
+            <h2 style="color: #2C4D9E; margin: 0; font-size: 22px;">
+              Đăng ký tài khoản B2B thành công
+            </h2>
+            <h3 style="color: #555; margin: 5px 0 0 0; font-size: 16px; font-weight: normal;">
+              Successful B2B Account Registration
+            </h3>
+          </div>
 
           <p style="font-size: 16px; color: #333;">
-            Xin chào <strong>${TenDoanhNghiep}</strong>,
+            Xin chào / Hello <strong>${TenDoanhNghiep}</strong>,
           </p>
           
-          <p style="font-size: 16px; color: #333;">
+          <p style="font-size: 15px; color: #333; margin-bottom: 5px;">
             Cảm ơn Quý doanh nghiệp đã đăng ký trở thành đối tác B2B của OnePass. Hồ sơ của Quý khách hiện đang ở trạng thái <strong>Chờ phê duyệt</strong>.
+          </p>
+          <p style="font-size: 14px; color: #666; font-style: italic; margin-top: 0;">
+            Thank you for registering to become a OnePass B2B partner. Your profile is currently <strong>Pending Approval</strong>.
           </p>
 
           <div style="
@@ -551,22 +553,27 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
             padding: 15px;
             border-radius: 8px;
             border-left: 4px solid #2C4D9E;
-            margin-top: 10px;
+            margin-top: 15px;
             font-size: 15px;
             color: #333;
           ">
-            <p><b>Số ĐKKD:</b> ${SoDKKD}</p>
-            <p><b>Người đại diện:</b> ${NguoiDaiDien}</p>
-            <p><b>Email đăng ký:</b> ${Email}</p>
-            <p><b>Số điện thoại:</b> ${SoDienThoai || "Chưa cập nhật"}</p>
+            <p style="margin: 5px 0;"><b>Số ĐKKD / Business Reg. No:</b> ${SoDKKD}</p>
+            <p style="margin: 5px 0;"><b>Người đại diện / Representative:</b> ${NguoiDaiDien}</p>
+            <p style="margin: 5px 0;"><b>Email đăng ký / Registered Email:</b> ${Email}</p>
+            <p style="margin: 5px 0;"><b>SĐT / Phone:</b> ${SoDienThoai || "N/A"}</p>
           </div>
 
-          <p style="font-size: 16px; color: #333; margin-top: 15px;">
-            Bộ phận quản lý sẽ kiểm tra và kích hoạt tài khoản trong thời gian sớm nhất. Quý khách sẽ nhận được email thông báo khi tài khoản được kích hoạt.
-          </p>
+          <div style="margin-top: 20px;">
+            <p style="font-size: 15px; color: #333; margin-bottom: 5px;">
+              Bộ phận quản lý sẽ kiểm tra và kích hoạt tài khoản trong thời gian sớm nhất. Quý khách sẽ nhận được email thông báo khi tài khoản được kích hoạt.
+            </p>
+            <p style="font-size: 14px; color: #666; font-style: italic; margin-top: 0;">
+              The management team will review and activate your account as soon as possible. You will receive a notification email once the account is activated.
+            </p>
+          </div>
 
-          <p style="margin-top: 20px; font-size: 13px; color: #6c757d; text-align: center;">
-            Trân trọng,<br>Đội ngũ OnePass
+          <p style="margin-top: 25px; font-size: 13px; color: #6c757d; text-align: center;">
+            Trân trọng / Best regards,<br><strong>Đội ngũ OnePass / OnePass Team</strong>
           </p>
         </div>
       `;
