@@ -453,11 +453,31 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
       NganhNgheChinh 
     } = req.body;
 
-    
+  
+    let PdfPath = null;
+    if (req.file) {
+      const fileExt = req.file.originalname.split(".").pop();
+      const fileName = `b2b_${SoDKKD}_${Date.now()}.${fileExt}`;
+      
+      
+      const { error: uploadError } = await supabase.storage
+        .from("b2b_docs") 
+        .upload(fileName, req.file.buffer, {
+          contentType: req.file.mimetype,
+          upsert: true,
+        });
+        
+      if (!uploadError) {
+        const { data: publicUrlData } = supabase.storage
+          .from("b2b_docs")
+          .getPublicUrl(fileName);
+        PdfPath = publicUrlData.publicUrl;
+      }
+    }
 
+   
     const hashedPassword = await bcrypt.hash(MatKhau, 10);
 
-    // Insert vào DB
     const { data, error } = await supabase
       .from("B2B_PENDING")
       .insert([
@@ -477,64 +497,74 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
       .select();
 
     if (error) throw error;
+    const newB2B = data[0]; 
 
-  
+
+    if (global.io) {
+      console.log("📡 [Socket] Đang gửi thông báo B2B mới tới Admin...");
+      
+     
+      const notificationPayload = {
+        YeuCauID: newB2B.ID,               
+        HoTen: `${TenDoanhNghiep}`,  
+        TenDichVu: "Đăng ký Đối tác B2B",
+        TenHinhThuc: "Form đăng ký",
+        SoDienThoai: SoDienThoai,
+        Email: Email,
+        NgayTao: new Date().toISOString(),
+        LoaiThongBao: "B2B_REGISTER"       
+      };
+
+      global.io.emit("new_request", notificationPayload);
+    }
     try {
       const emailContent = `
-        <div style="
-          max-width: 600px;
-          margin: auto;
-          padding: 20px;
-          font-family: Arial, sans-serif;
-          border: 1px solid #e0e0e0;
-          border-radius: 8px;
-          background-color: #ffffff;
-        ">
+        <div style="max-width: 600px; margin: auto; padding: 20px; font-family: Arial, sans-serif; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #ffffff;">
           <h2 style="color: #2C4D9E; text-align: center; border-bottom: 2px solid #2C4D9E; padding-bottom: 10px;">
             Đăng ký tài khoản B2B thành công
           </h2>
-          
           <p>Xin chào <strong>${TenDoanhNghiep}</strong>,</p>
-          
           <p>Cảm ơn Quý doanh nghiệp đã đăng ký trở thành đối tác B2B của OnePass.</p>
-          
           <div style="background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 15px 0;">
             <p style="margin: 5px 0;"><strong>Mã số thuế/ĐKKD:</strong> ${SoDKKD}</p>
             <p style="margin: 5px 0;"><strong>Người đại diện:</strong> ${NguoiDaiDien}</p>
-            <p style="margin: 5px 0;"><strong>Email đăng ký:</strong> ${Email}</p>
           </div>
-
-          <p>Hồ sơ của Quý khách hiện đang ở trạng thái <strong>Chờ phê duyệt</strong>. Bộ phận quản lý của OnePass sẽ kiểm tra và kích hoạt tài khoản trong thời gian sớm nhất.</p>
-          
-          <p>Quý khách sẽ nhận được email thông báo ngay khi tài khoản được kích hoạt.</p>
-
+          <p>Hồ sơ đang chờ phê duyệt. Chúng tôi sẽ thông báo lại sớm nhất.</p>
           <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-          
-          <p style="text-align: center; font-size: 12px; color: #888;">
-            Trân trọng,<br>
-            Đội ngũ OnePass
-          </p>
+          <p style="text-align: center; font-size: 12px; color: #888;">Đội ngũ OnePass</p>
         </div>
       `;
-
       await sendEmailToCustomer(Email, "OnePass - Xác nhận đăng ký B2B", emailContent);
-      
-    
-      
     } catch (mailError) {
-      console.error("⚠️ Không thể gửi email xác nhận:", mailError);
-  
+      console.error("⚠️ Lỗi gửi mail khách:", mailError);
     }
-    // -----------------------------------------------------------
 
-    res.json({ success: true, message: "Đăng ký thành công", data: data[0] });
+    
+    try {
+      const adminEmails = await getAdminEmails();
+      await sendEmailToAdmin(
+        "🔔 Có doanh nghiệp B2B mới đăng ký",
+        `
+          <h3>Doanh nghiệp mới đăng ký B2B</h3>
+          <p><b>Tên DN:</b> ${TenDoanhNghiep}</p>
+          <p><b>MST:</b> ${SoDKKD}</p>
+          <p><b>Người đại diện:</b> ${NguoiDaiDien}</p>
+          <p>Vui lòng truy cập CMS để duyệt.</p>
+        `,
+        adminEmails
+      );
+    } catch (adminMailErr) {
+      console.error("⚠️ Lỗi gửi mail admin:", adminMailErr);
+    }
+
+    res.json({ success: true, message: "Đăng ký thành công", data: newB2B });
+
   } catch (err) {
-    console.error("❌ Lỗi đăng ký B2B:", err);
+    console.error("❌ Lỗi API đăng ký B2B:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// API chỉ để cập nhật thông tin doanh nghiệp pending
 app.put("/api/b2b/pending/:id", async (req, res) => {
   try {
     const { id } = req.params;
