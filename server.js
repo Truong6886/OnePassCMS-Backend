@@ -518,20 +518,56 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
       global.io.emit("new_request", notificationPayload);
     }
     try {
-      const emailContent = `
-        <div style="max-width: 600px; margin: auto; padding: 20px; font-family: Arial, sans-serif; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #ffffff;">
-          <h2 style="color: #2C4D9E; text-align: center; border-bottom: 2px solid #2C4D9E; padding-bottom: 10px;">
+     const emailContent = `
+        <div style="
+          max-width: 600px;
+          margin: auto;
+          padding: 20px;
+          font-family: 'Segoe UI', Arial, sans-serif;
+          border: 1px solid #e5e7eb;
+          border-radius: 10px;
+          background: #ffffff;
+        ">
+          <h2 style="
+            color: #2C4D9E;
+            text-align: center;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #2C4D9E;
+            padding-bottom: 10px;
+          ">
             Đăng ký tài khoản B2B thành công
           </h2>
-          <p>Xin chào <strong>${TenDoanhNghiep}</strong>,</p>
-          <p>Cảm ơn Quý doanh nghiệp đã đăng ký trở thành đối tác B2B của OnePass.</p>
-          <div style="background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 15px 0;">
-            <p style="margin: 5px 0;"><strong>Mã số thuế/ĐKKD:</strong> ${SoDKKD}</p>
-            <p style="margin: 5px 0;"><strong>Người đại diện:</strong> ${NguoiDaiDien}</p>
+
+          <p style="font-size: 16px; color: #333;">
+            Xin chào <strong>${TenDoanhNghiep}</strong>,
+          </p>
+          
+          <p style="font-size: 16px; color: #333;">
+            Cảm ơn Quý doanh nghiệp đã đăng ký trở thành đối tác B2B của OnePass. Hồ sơ của Quý khách hiện đang ở trạng thái <strong>Chờ phê duyệt</strong>.
+          </p>
+
+          <div style="
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #2C4D9E;
+            margin-top: 10px;
+            font-size: 15px;
+            color: #333;
+          ">
+            <p><b>Số ĐKKD:</b> ${SoDKKD}</p>
+            <p><b>Người đại diện:</b> ${NguoiDaiDien}</p>
+            <p><b>Email đăng ký:</b> ${Email}</p>
+            <p><b>Số điện thoại:</b> ${SoDienThoai || "Chưa cập nhật"}</p>
           </div>
-          <p>Hồ sơ đang chờ phê duyệt. Chúng tôi sẽ thông báo lại sớm nhất.</p>
-          <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-          <p style="text-align: center; font-size: 12px; color: #888;">Đội ngũ OnePass</p>
+
+          <p style="font-size: 16px; color: #333; margin-top: 15px;">
+            Bộ phận quản lý sẽ kiểm tra và kích hoạt tài khoản trong thời gian sớm nhất. Quý khách sẽ nhận được email thông báo khi tài khoản được kích hoạt.
+          </p>
+
+          <p style="margin-top: 20px; font-size: 13px; color: #6c757d; text-align: center;">
+            Trân trọng,<br>Đội ngũ OnePass
+          </p>
         </div>
       `;
       await sendEmailToCustomer(Email, "OnePass - Xác nhận đăng ký B2B", emailContent);
@@ -540,16 +576,72 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
     }
 
     
-    try {
+   try {
       const adminEmails = await getAdminEmails();
       await sendEmailToAdmin(
-        "🔔 Có doanh nghiệp B2B mới đăng ký",
+        "OnePass - Có doanh nghiệp B2B mới đăng ký",
         `
-          <h3>Doanh nghiệp mới đăng ký B2B</h3>
-          <p><b>Tên DN:</b> ${TenDoanhNghiep}</p>
-          <p><b>MST:</b> ${SoDKKD}</p>
-          <p><b>Người đại diện:</b> ${NguoiDaiDien}</p>
-          <p>Vui lòng truy cập CMS để duyệt.</p>
+        <div style="
+          max-width: 600px;
+          margin: auto;
+          padding: 20px;
+          font-family: 'Segoe UI', Arial, sans-serif;
+          border: 1px solid #e5e7eb;
+          border-radius: 10px;
+          background: #ffffff;
+        ">
+          
+          <h2 style="
+            color: #2C4D9E;
+            text-align: center;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #2C4D9E;
+            padding-bottom: 10px;
+          ">
+            Doanh nghiệp mới đăng ký đối tác
+          </h2>
+
+          <p style="font-size: 16px; color: #333;">
+            Một doanh nghiệp vừa gửi hồ sơ đăng ký đối tác. Vui lòng xem chi tiết bên dưới:
+          </p>
+
+          <div style="
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #2C4D9E;
+            margin-top: 10px;
+            font-size: 15px;
+            color: #333;
+          ">
+            <p><b>Tên doanh nghiệp:</b> ${TenDoanhNghiep}</p>
+            <p><b>Số ĐKKD:</b> ${SoDKKD}</p>
+            <p><b>Người đại diện:</b> ${NguoiDaiDien}</p>
+            <p><b>Email:</b> ${Email}</p>
+            <p><b>Số điện thoại:</b> ${SoDienThoai || ""}</p>
+            <p><b>Ngành nghề:</b> ${NganhNgheChinh || ""}</p>
+          </div>
+
+          <div style="margin-top: 25px; text-align: center;">
+            <a href="https://onepasscms.vercel.app"
+              style="
+                background: #2C4D9E;
+                color: white;
+                padding: 12px 24px;
+                border-radius: 6px;
+                text-decoration: none;
+                font-size: 16px;
+                font-weight: bold;
+                display: inline-block;
+              ">
+              Mở CMS để duyệt
+            </a>
+          </div>
+
+          <p style="margin-top: 20px; font-size: 13px; color: #6c757d; text-align: center;">
+            Email được gửi tự động từ hệ thống OnePass CMS.
+          </p>
+        </div>
         `,
         adminEmails
       );
