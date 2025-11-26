@@ -29,50 +29,31 @@ function translateServiceName(name) {
 
   return map[name?.trim()] || name?.trim() || "";
 }
-function getRankAndDiscount(total) {
-  const t = Number(total) || 0;
-  // Cập nhật theo đúng mốc bạn yêu cầu
-  if (t >= 300_000_000) return { Hang: "Diamond", MucChietKhau: 30 };
-  if (t >= 250_000_000) return { Hang: "Platinum", MucChietKhau: 17 };
-  if (t >= 200_000_000) return { Hang: "Gold", MucChietKhau: 15 };
-  if (t >= 150_000_000) return { Hang: "Silver", MucChietKhau: 12 };
-  if (t >= 100_000_000) return { Hang: "Bronze", MucChietKhau: 10 };
-  
- 
-  return { Hang: "New-bie", MucChietKhau: 5 };
-}
-async function updateCompanyRank(companyId) {
-  try {
 
-    const { data: services, error } = await supabase
-      .from("B2B_SERVICES")
-      .select("DoanhThuSauChietKhau")
-      .eq("DoanhNghiepID", companyId);
+function tinhHangVaChietKhau(totalRevenue) {
+  let hang = "New-bie";
+  let chietKhau = 5;
 
-    if (error) throw error;
-
-
-    const totalRevenue = services.reduce((sum, item) => sum + (item.DoanhThuSauChietKhau || 0), 0);
-
-    const { Hang, MucChietKhau } = getRankAndDiscount(totalRevenue);
-
-    
-      await supabase
-    .from("B2B_APPROVED")
-    .update({ 
-      TongDoanhThu: totalRevenue,
-      XepHang: Hang,
-      MucChietKhau: MucChietKhau
-    })
-    .eq("ID", companyId);
-
-
-    console.log(`Đã cập nhật Doanh Nghiệp ${companyId}: Tổng ${totalRevenue} - Hạng ${Hang} - CK ${MucChietKhau}%`);
-    return { totalRevenue, Hang, MucChietKhau };
-  } catch (err) {
-    console.error("Lỗi updateCompanyRank:", err);
+  if (totalRevenue >= 300_000_000) {
+    hang = "Diamond";
+    chietKhau = 30;
+  } else if (totalRevenue >= 250_000_000) {
+    hang = "Platinum";
+    chietKhau = 17;
+  } else if (totalRevenue >= 200_000_000) {
+    hang = "Gold";
+    chietKhau = 15;
+  } else if (totalRevenue >= 150_000_000) {
+    hang = "Silver";
+    chietKhau = 12;
+  } else if (totalRevenue >= 100_000_000) {
+    hang = "Bronze";
+    chietKhau = 10;
   }
+
+  return { hang, chietKhau };
 }
+
 
 ``
 emailjs.init({
