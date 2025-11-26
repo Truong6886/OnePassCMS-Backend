@@ -800,7 +800,6 @@ app.get("/api/b2b/services", async (req, res) => {
   }
 });
 
-// ✅ API: Lấy số dư ví và Hạng hiện tại của doanh nghiệp
 app.get("/api/b2b/services/wallet", async (req, res) => {
   try {
     const { userId } = req.query;
@@ -809,89 +808,86 @@ app.get("/api/b2b/services/wallet", async (req, res) => {
       return res.status(400).json({ success: false, message: "Thiếu userId" });
     }
 
-    // SỬA: Thêm "Hang" vào select
     const { data, error } = await supabase
-      .from("B2B_SERVICES")
-      .select("SoDuVi, Hang") 
-      .eq("DoanhNghiepID", userId)
-      .order("STT", { ascending: false })
-      .limit(1)
+      .from("B2B_APPROVED")
+      .select("SoDuVi, XepHang")
+      .eq("ID", userId)
       .maybeSingle();
 
     if (error) throw error;
 
-    const currentBalance = data?.SoDuVi ?? 2000000;
-    const currentRank = data?.Hang || "New-bie"; 
+    const soDu = data?.SoDuVi ?? 2000000;
+    const hang = data?.XepHang || "New-bie";
 
-    // SỬA: Trả về thêm Hang
-    res.json({ success: true, SoDuVi: currentBalance, Hang: currentRank });
+    res.json({ success: true, SoDuVi: soDu, Hang: hang });
 
   } catch (err) {
-    console.error("❌ Lỗi lấy số dư ví:", err);
+    console.error("❌ Lỗi lấy ví:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
 app.post("/api/b2b/services", async (req, res) => {
   try {
     const {
       DoanhNghiepID,
-      LoaiDichVu,   
-      MaDichVu,   
+      LoaiDichVu,
+      MaDichVu,
       NgayThucHien,
       NgayHoanThanh,
       DoanhThuTruocChietKhau,
       MucChietKhau,
-      DoanhThuSauChietKhau,
       TongDoanhThuTichLuy,
       Vi
     } = req.body;
 
     if (!DoanhNghiepID || !LoaiDichVu || Vi == null) {
-      return res.status(400).json({ success: false, message: "Thiếu thông tin bắt buộc" });
+      return res.status(400).json({ success: false, message: "Thiếu dữ liệu" });
     }
 
-    // 1. Lấy SoDuVi gốc từ bảng B2B_SERVICES
-    const { data: serviceData, error: fetchError } = await supabase
-      .from("B2B_SERVICES")
+
+    const { data: approved, error: e1 } = await supabase
+      .from("B2B_APPROVED")
       .select("SoDuVi")
-      .eq("DoanhNghiepID", DoanhNghiepID)
-      .order("STT", { ascending: false })
-      .limit(1)
-      .single();
+      .eq("ID", DoanhNghiepID)
+      .maybeSingle();
 
-    // Nếu không tìm thấy record nào, dùng default 2tr
-    const SoDuViGoc = serviceData?.SoDuVi ?? 2000000;
-    const SoDuViMoi = SoDuViGoc - Vi;
+    if (e1) throw e1;
 
-    if (SoDuViMoi < 0) {
+    const SoDuCu = approved?.SoDuVi ?? 2000000;
+    const SoDuMoi = SoDuCu - Vi;
+
+    if (SoDuMoi < 0) {
       return res.status(400).json({ success: false, message: "Số dư ví không đủ" });
     }
 
-    // Tính toán số tiền chiết khấu và doanh thu sau chiết khấu
-    const SoTienChietKhau = Math.round((DoanhThuTruocChietKhau * (MucChietKhau || 0)) / 100);
-    const calculatedDoanhThuSauChietKhau = DoanhThuTruocChietKhau - SoTienChietKhau;
+    await supabase
+      .from("B2B_APPROVED")
+      .update({ SoDuVi: SoDuMoi })
+      .eq("ID", DoanhNghiepID);
 
-    // 2. Lưu dịch vụ mới với Vi và SoDuVi mới
+    const SoTienChietKhau = Math.round((DoanhThuTruocChietKhau * (MucChietKhau || 0)) / 100);
+    const DoanhThuSauChietKhau = DoanhThuTruocChietKhau - SoTienChietKhau;
+
+ 
     const { data, error } = await supabase
       .from("B2B_SERVICES")
-      .insert([
-        {
-          DoanhNghiepID,
-          LoaiDichVu,
-          TenDichVu: req.body.TenDichVu || "",
-          ServiceID: MaDichVu,
-          NgayThucHien: NgayThucHien || null,
-          NgayHoanThanh: NgayHoanThanh || null,
-          DoanhThuTruocChietKhau,
-          MucChietKhau,
-          SoTienChietKhau,
-          DoanhThuSauChietKhau: calculatedDoanhThuSauChietKhau,
-          TongDoanhThuTichLuy,
-          Vi,
-          SoDuVi: SoDuViMoi,
-          CreatedAt: new Date().toISOString()
-        }
-      ])
+      .insert([{
+        DoanhNghiepID,
+        LoaiDichVu,
+        TenDichVu: req.body.TenDichVu || "",
+        ServiceID: MaDichVu,
+        NgayThucHien,
+        NgayHoanThanh,
+        DoanhThuTruocChietKhau,
+        MucChietKhau,
+        SoTienChietKhau,
+        DoanhThuSauChietKhau,
+        TongDoanhThuTichLuy,
+        Vi,
+        SoDuViSauKhiTru: SoDuMoi,
+        CreatedAt: new Date().toISOString()
+      }])
       .select()
       .single();
 
@@ -899,16 +895,14 @@ app.post("/api/b2b/services", async (req, res) => {
 
     res.json({
       success: true,
-      data: { 
-        ...data, 
-        ID: data.STT, 
-        SoDuViGoc, 
-        SoDuViMoi 
-      }
+      data,
+      ViDaTru: Vi,
+      SoDuCu,
+      SoDuMoi
     });
 
   } catch (err) {
-    console.error("❌ Lỗi thêm B2B_SERVICES:", err);
+    console.error("❌ Lỗi thêm service:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -916,88 +910,115 @@ app.post("/api/b2b/services", async (req, res) => {
 
 
 
-app.put("/api/b2b/services/update/:id", async (req, res) => {
+app.put("/api/b2b/services/:id", async (req, res) => {
   try {
-    const { id } = req.params; // STT
+    const serviceID = req.params.id;
+
     const {
+      DoanhNghiepID,
       LoaiDichVu,
-      TenDichVu,
       MaDichVu,
+      TenDichVu,
       NgayThucHien,
       NgayHoanThanh,
       DoanhThuTruocChietKhau,
       MucChietKhau,
-      Vi // Nhập ví mới từ client
+      TongDoanhThuTichLuy,
+      Vi 
     } = req.body;
 
-    if (Vi == null) {
-      return res.status(400).json({ success: false, message: "Thiếu thông tin Vi" });
+    if (!serviceID || !DoanhNghiepID) {
+      return res.status(400).json({ success: false, message: "Thiếu dữ liệu" });
     }
 
-    // Lấy dịch vụ hiện tại để biết DoanhNghiepID, SoDuVi và Vi cũ
-    const { data: currentService, error: fetchError } = await supabase
+
+    const { data: oldService, error: errOld } = await supabase
       .from("B2B_SERVICES")
-      .select("DoanhNghiepID, SoDuVi, Vi")
-      .eq("STT", id)
-      .single();
-    if (fetchError) throw fetchError;
+      .select("Vi")
+      .eq("STT", serviceID)
+      .maybeSingle();
 
-    const SoDuViHienTai = currentService?.SoDuVi ?? 2000000;
-    const ViCu = currentService?.Vi ?? 0;
-    const ViMoi = Vi;
-
-    // Tính chênh lệch giữa ví mới và ví cũ
-    const chenhLechVi = ViMoi - ViCu;
-    const SoDuViMoi = SoDuViHienTai - chenhLechVi;
-
-    if (SoDuViMoi < 0) {
-      return res.status(400).json({ success: false, message: "Số dư ví không đủ" });
+    if (errOld) throw errOld;
+    if (!oldService) {
+      return res.status(404).json({ success: false, message: "Service không tồn tại" });
     }
 
-    // Tính toán số tiền chiết khấu và doanh thu sau chiết khấu
+    const oldVi = oldService.Vi; 
+
+    const { data: approved, error: errWallet } = await supabase
+      .from("B2B_APPROVED")
+      .select("SoDuVi")
+      .eq("ID", DoanhNghiepID)
+      .maybeSingle();
+
+    if (errWallet) throw errWallet;
+
+    const currentWallet = approved?.SoDuVi ?? 2000000;
+
+
+    const walletAfterRefund = currentWallet + oldVi;
+    const walletFinal = walletAfterRefund - Vi;
+
+    if (walletFinal < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Số dư ví không đủ sau khi cập nhật dịch vụ"
+      });
+    }
+
+    
+    const { error: errUpdateWallet } = await supabase
+      .from("B2B_APPROVED")
+      .update({ SoDuVi: walletFinal })
+      .eq("ID", DoanhNghiepID);
+
+    if (errUpdateWallet) throw errUpdateWallet;
+
+  
     const SoTienChietKhau = Math.round((DoanhThuTruocChietKhau * (MucChietKhau || 0)) / 100);
     const DoanhThuSauChietKhau = DoanhThuTruocChietKhau - SoTienChietKhau;
 
-    // Cập nhật dịch vụ
-    const { data, error } = await supabase
+   
+    const { data, error: errUpdate } = await supabase
       .from("B2B_SERVICES")
       .update({
         LoaiDichVu,
         TenDichVu,
         ServiceID: MaDichVu,
-        NgayThucHien: NgayThucHien || null,
-        NgayHoanThanh: NgayHoanThanh || null,
-        Vi: ViMoi,
-        SoDuVi: SoDuViMoi,
+        NgayThucHien,
+        NgayHoanThanh,
         DoanhThuTruocChietKhau,
         MucChietKhau,
         SoTienChietKhau,
         DoanhThuSauChietKhau,
+        TongDoanhThuTichLuy,
+        Vi, // số tiền ví mới
+        SoDuViSauKhiTru: walletFinal,
         UpdatedAt: new Date().toISOString()
       })
-      .eq("STT", id)
+      .eq("STT", serviceID)
       .select()
-      .maybeSingle();
+      .single();
 
-    if (error) throw error;
+    if (errUpdate) throw errUpdate;
 
-    res.json({ 
-      success: true, 
+    return res.json({
+      success: true,
+      message: "Cập nhật dịch vụ & số dư ví thành công",
       data,
-      changes: {
-        ViCu,
-        ViMoi,
-        chenhLechVi,
-        SoDuViHienTai,
-        SoDuViMoi
-      }
+      oldVi,
+      ViMoi: Vi,
+      SoDuCu: currentWallet,
+      SoDuSauHoan: walletAfterRefund,
+      SoDuCuoi: walletFinal
     });
 
   } catch (err) {
-    console.error("❌ Lỗi update B2B_SERVICES:", err);
-    res.status(500).json({ success: false, message: err.message });
+    console.error("❌ Lỗi update service:", err);
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
+
 
 app.post("/api/b2b/update", async (req, res) => {
   try {
