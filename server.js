@@ -1103,7 +1103,7 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-
+    // 1. Lấy thông tin từ Pending
     const { data: pendingData, error: pendingError } = await supabase
       .from("B2B_PENDING")
       .select("*")
@@ -1120,7 +1120,7 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
 
     const dichVuNames = pendingData.DichVu || "";
 
-   
+    // 2. Chèn vào bảng APPROVED
     const { data: approvedData, error: insertError } = await supabase
       .from("B2B_APPROVED")
       .insert([
@@ -1147,17 +1147,109 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
 
     const approvedId = approvedData.ID;
 
-   
+    // 3. Chèn dịch vụ vào bảng con B2B_APPROVED_SERVICES
     if (dichVuNames) {
-      await supabase.from("B2B_APPROVED_SERVICES").insert([
-        {
-          DoanhNghiepID: approvedId,
-          TenDichVu: dichVuNames,
-        }
-      ]);
+      const servicesArray = dichVuNames.split(",").map(dv => dv.trim());
+      
+      const servicesToInsert = servicesArray.map(serviceName => ({
+        DoanhNghiepID: approvedId,
+        TenDichVu: serviceName,
+        NgayTao: new Date().toISOString(),
+        NgayCapNhat: new Date().toISOString()
+      }));
+
+      const { error: servicesError } = await supabase
+        .from("B2B_APPROVED_SERVICES")
+        .insert(servicesToInsert);
+
+      if (servicesError) throw servicesError;
     }
 
-    // 4️⃣ Xóa pending
+    // ============================================================
+    // 4. GỬI EMAIL THÔNG BÁO DUYỆT THÀNH CÔNG
+    // ============================================================
+    try {
+      const emailContent = `
+        <div style="
+          max-width: 600px;
+          margin: auto;
+          padding: 20px;
+          font-family: 'Segoe UI', Arial, sans-serif;
+          border: 1px solid #e5e7eb;
+          border-radius: 10px;
+          background: #ffffff;
+        ">
+          <div style="text-align: center; border-bottom: 2px solid #22c55e; padding-bottom: 15px; margin-bottom: 20px;">
+            <h2 style="color: #22c55e; margin: 0; font-size: 22px;">
+              Hồ sơ đăng ký đối tác đã được phê duyệt
+            </h2>
+            <h3 style="color: #666; margin: 5px 0 0 0; font-size: 16px; font-weight: normal; font-style: italic;">
+              B2B Partner Registration Approved
+            </h3>
+          </div>
+
+          <p style="font-size: 16px; color: #333; margin-bottom: 20px;">
+            Xin chào <strong>${pendingData.TenDoanhNghiep}</strong>,<br>
+            <span style="font-size: 14px; color: #666; font-style: italic;">Hello <strong>${pendingData.TenDoanhNghiep}</strong>,</span>
+          </p>
+          
+          <p style="font-size: 15px; color: #333; margin-bottom: 2px;">
+            Chúc mừng! Hồ sơ đăng ký đối tác của Quý doanh nghiệp đã được phê duyệt thành công.
+          </p>
+          <p style="font-size: 14px; color: #666; font-style: italic; margin-top: 0; margin-bottom: 20px;">
+            Congratulations! Your B2B partner registration application has been successfully approved.
+          </p>
+
+          <div style="
+            background: #f0fdf4;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #22c55e;
+            margin-top: 15px;
+            font-size: 15px;
+            color: #333;
+          ">
+            <p style="margin: 0;">Hiện tại, Quý khách đã có thể đăng nhập vào hệ thống B2B của OnePass để sử dụng dịch vụ.</p>
+            <p style="margin-top: 5px; font-style: italic; color: #666; font-size: 13px;">
+              You can now log in to the OnePass B2B system to use our services.
+            </p>
+          </div>
+
+          <div style="margin-top: 30px; text-align: center;">
+            <a href="https://b2bonepass.vercel.app" 
+               style="
+                 background-color: #2C4D9E; 
+                 color: white; 
+                 padding: 12px 25px; 
+                 text-decoration: none; 
+                 border-radius: 5px; 
+                 font-weight: bold;
+                 font-size: 16px;
+               ">
+               Đăng nhập ngay / Login Now
+            </a>
+          </div>
+
+          <p style="margin-top: 30px; font-size: 14px; color: #333; text-align: center;">
+            Trân trọng,<br>
+            <span style="font-size: 13px; color: #666; font-style: italic;">Best regards,</span><br><br>
+            <strong>Đội ngũ OnePass</strong><br>
+            <span style="font-size: 13px; color: #666; font-style: italic;">OnePass Team</span>
+          </p>
+        </div>
+      `;
+
+      await sendEmailToCustomer(
+        pendingData.Email, 
+        "OnePass - Hồ sơ đăng ký đối tác đã được duyệt | B2B Partner Registration Approved", 
+        emailContent
+      );
+      
+    } catch (mailError) {
+      console.error("⚠️ Lỗi gửi mail duyệt cho khách:", mailError);
+    }
+
+    // 5. Xóa khỏi Pending sau khi đã xử lý xong xuôi
     const { error: deleteError } = await supabase
       .from("B2B_PENDING")
       .delete()
