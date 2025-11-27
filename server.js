@@ -737,7 +737,18 @@ app.post("/api/User", async (req, res) => {
       return res.status(400).json({ success: false, message: "Thiếu thông tin bắt buộc" });
     }
 
+    // [FIX] Kiểm tra xem email đã tồn tại chưa
+    const { data: existingUser, error: checkError } = await supabase
+      .from("User")
+      .select("id")
+      .eq("email", email)
+      .maybeSingle();
 
+    if (existingUser) {
+      return res.status(400).json({ success: false, message: "Email này đã được sử dụng bởi tài khoản khác!" });
+    }
+
+    // Hash mật khẩu
     const hashedPassword = await bcrypt.hash(password, 10);
     const is_admin = role === "admin";
     const is_director = role === "director";
@@ -763,6 +774,10 @@ app.post("/api/User", async (req, res) => {
     res.json({ success: true, message: "Tạo nhân viên thành công", data: data[0] });
   } catch (err) {
     console.error("❌ Lỗi tạo User:", err);
+    // Kiểm tra lại lần nữa nếu có lỗi DB trả về
+    if (err.message && err.message.includes("User_email_key")) {
+       return res.status(400).json({ success: false, message: "Email đã tồn tại trong hệ thống." });
+    }
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -785,11 +800,24 @@ app.delete("/api/User/:id", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-// [CẬP NHẬT] Update User bao gồm cả quyền hạn
 app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, username, email, password, role } = req.body; // Thêm role
+    const { name, username, email, password, role } = req.body; 
+
+  
+    if (email) {
+      const { data: existingEmail } = await supabase
+        .from("User")
+        .select("id")
+        .eq("email", email)
+        .neq("id", id) 
+        .maybeSingle();
+
+      if (existingEmail) {
+        return res.status(400).json({ success: false, message: "Email này đã thuộc về người khác!" });
+      }
+    }
 
     const updateData = { 
       name,
@@ -798,7 +826,6 @@ app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
       updated_at: new Date().toISOString()
     };
 
-   
     if (role) {
       updateData.is_admin = role === "admin";
       updateData.is_director = role === "director";
@@ -840,6 +867,9 @@ app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
     res.json({ success: true, data: data[0], message: "Cập nhật thành công" });
   } catch (err) {
     console.error("Error updating user:", err);
+    if (err.message && err.message.includes("User_email_key")) {
+       return res.status(400).json({ success: false, message: "Email đã tồn tại." });
+    }
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -2452,6 +2482,17 @@ app.post("/api/register", async (req, res) => {
   if (!username || !email || !password) return res.status(400).json({ success: false, message: "Thiếu dữ liệu" });
 
   try {
+    
+    const { data: existingUser } = await supabase
+      .from("User")
+      .select("id")
+      .eq("email", email)
+      .maybeSingle();
+
+    if (existingUser) {
+      return res.status(400).json({ success: false, message: "Email đã được đăng ký!" });
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
     const { data, error } = await supabase
       .from("User")
@@ -2462,10 +2503,14 @@ app.post("/api/register", async (req, res) => {
         name: username
       }])
       .select();
-    handleSupabaseError(error);
+    
+    if (error) throw error;
 
     res.json({ success: true, user: data[0] });
   } catch (err) {
+    if (err.message && err.message.includes("User_email_key")) {
+       return res.status(400).json({ success: false, message: "Email đã tồn tại." });
+    }
     res.status(500).json({ success: false, message: err.message });
   }
 });
