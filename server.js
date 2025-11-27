@@ -729,7 +729,120 @@ app.put("/api/b2b/pending/:id", async (req, res) => {
     });
   }
 });
+app.post("/api/User", async (req, res) => {
+  try {
+    const { username, password, email, name, role } = req.body;
+    
+    if (!username || !password || !email) {
+      return res.status(400).json({ success: false, message: "Thiếu thông tin bắt buộc" });
+    }
 
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const is_admin = role === "admin";
+    const is_director = role === "director";
+    const is_accountant = role === "accountant";
+    const is_staff = role === "staff";
+
+    const { data, error } = await supabase
+      .from("User")
+      .insert([{ 
+        username, 
+        email, 
+        password_hash: hashedPassword, 
+        name: name || username,
+        is_admin,
+        is_director,
+        is_accountant,
+        is_staff
+      }])
+      .select();
+
+    if (error) throw error;
+
+    res.json({ success: true, message: "Tạo nhân viên thành công", data: data[0] });
+  } catch (err) {
+    console.error("❌ Lỗi tạo User:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+app.delete("/api/User/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Xóa user
+    const { error } = await supabase
+      .from("User")
+      .delete()
+      .eq("id", id);
+
+    if (error) throw error;
+
+    res.json({ success: true, message: "Đã xóa nhân viên" });
+  } catch (err) {
+    console.error("❌ Lỗi xóa User:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+// [CẬP NHẬT] Update User bao gồm cả quyền hạn
+app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, username, email, password, role } = req.body; // Thêm role
+
+    const updateData = { 
+      name,
+      username, 
+      email,
+      updated_at: new Date().toISOString()
+    };
+
+   
+    if (role) {
+      updateData.is_admin = role === "admin";
+      updateData.is_director = role === "director";
+      updateData.is_accountant = role === "accountant";
+      updateData.is_staff = role === "staff";
+    }
+
+    if (password && password.trim() !== "") {
+      updateData.password_hash = await bcrypt.hash(password, 10);
+    }
+
+    if (req.file) {
+      const fileExt = req.file.originalname.split(".").pop() || 'jpg';
+      const fileName = `avatar_${id}_${Date.now()}.${fileExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("avatars")
+        .upload(fileName, req.file.buffer, { 
+          contentType: req.file.mimetype,
+          upsert: true 
+        });
+
+      if (!uploadError) {
+        const { data: publicUrlData } = supabase.storage
+          .from("avatars")
+          .getPublicUrl(fileName);
+        updateData.avatar = publicUrlData.publicUrl;
+      }
+    }
+
+    const { data, error } = await supabase
+      .from("User")
+      .update(updateData)
+      .eq("id", id)
+      .select();
+
+    if (error) throw error;
+
+    res.json({ success: true, data: data[0], message: "Cập nhật thành công" });
+  } catch (err) {
+    console.error("Error updating user:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 app.get("/api/b2b/reject", async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
