@@ -453,12 +453,48 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
       NganhNgheChinh 
     } = req.body;
 
-  
+    // ==================================================================
+    // 1. KIỂM TRA TRÙNG SỐ ĐKKD (QUAN TRỌNG)
+    // ==================================================================
+    
+    // Kiểm tra trong bảng ĐÃ DUYỆT (B2B_APPROVED)
+    const { data: existingApproved, error: errApproved } = await supabase
+      .from("B2B_APPROVED")
+      .select("ID")
+      .eq("SoDKKD", SoDKKD)
+      .maybeSingle();
+
+    if (errApproved) throw errApproved;
+    if (existingApproved) {
+      return res.status(400).json({
+        success: false,
+        message: "Số ĐKKD này đã tồn tại trong hệ thống (Đã được duyệt)."
+      });
+    }
+
+    // Kiểm tra trong bảng CHỜ DUYỆT (B2B_PENDING)
+    const { data: existingPending, error: errPending } = await supabase
+      .from("B2B_PENDING")
+      .select("ID")
+      .eq("SoDKKD", SoDKKD)
+      .maybeSingle();
+
+    if (errPending) throw errPending;
+    if (existingPending) {
+      return res.status(400).json({
+        success: false,
+        message: "Số ĐKKD này đang chờ phê duyệt. Vui lòng chờ phản hồi."
+      });
+    }
+    
+    // ==================================================================
+    // 2. NẾU KHÔNG TRÙNG THÌ TIẾP TỤC XỬ LÝ UPLOAD VÀ LƯU DATABASE
+    // ==================================================================
+
     let PdfPath = null;
     if (req.file) {
       const fileExt = req.file.originalname.split(".").pop();
       const fileName = `b2b_${SoDKKD}_${Date.now()}.${fileExt}`;
-      
       
       const { error: uploadError } = await supabase.storage
         .from("b2b_pdf") 
@@ -475,8 +511,6 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
       }
     }
 
-   
-    const hashedPassword = await bcrypt.hash(MatKhau, 10);
 
     const { data, error } = await supabase
       .from("B2B_PENDING")
@@ -485,7 +519,7 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
           TenDoanhNghiep,
           SoDKKD,
           Email,
-          MatKhau: hashedPassword,
+          MatKhau: MatKhau, 
           SoDienThoai,
           NguoiDaiDien,
           DichVu,
@@ -499,11 +533,9 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
     if (error) throw error;
     const newB2B = data[0]; 
 
-
+    // Gửi Socket thông báo
     if (global.io) {
       console.log("📡 [Socket] Đang gửi thông báo B2B mới tới Admin...");
-      
-     
       const notificationPayload = {
         YeuCauID: newB2B.ID,               
         HoTen: `${TenDoanhNghiep}`,  
@@ -514,7 +546,6 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
         NgayTao: new Date().toISOString(),
         LoaiThongBao: "B2B_REGISTER"       
       };
-
       global.io.emit("new_request", notificationPayload);
     }
     try {
@@ -1120,14 +1151,17 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
 
     const dichVuNames = pendingData.DichVu || "";
 
-    // 2. Chèn vào bảng APPROVED
+  
+    const hashedPassword = await bcrypt.hash(pendingData.MatKhau, 10);
+
+    // 2. Chèn vào bảng APPROVED với mật khẩu ĐÃ MÃ HÓA
     const { data: approvedData, error: insertError } = await supabase
       .from("B2B_APPROVED")
       .insert([
         {
           TenDoanhNghiep: pendingData.TenDoanhNghiep,
           SoDKKD: pendingData.SoDKKD,
-          MatKhau: pendingData.MatKhau,
+          MatKhau: hashedPassword, // Lưu mật khẩu đã mã hóa để login
           Email: pendingData.Email,
           SoDienThoai: pendingData.SoDienThoai,
           NguoiDaiDien: pendingData.NguoiDaiDien,
@@ -1166,7 +1200,7 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
     }
 
     // ============================================================
-    // 4. GỬI EMAIL THÔNG BÁO DUYỆT THÀNH CÔNG
+    // 4. GỬI EMAIL THÔNG BÁO KÈM MẬT KHẨU GỐC
     // ============================================================
     try {
       const emailContent = `
@@ -1196,9 +1230,6 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
           <p style="font-size: 15px; color: #333; margin-bottom: 2px;">
             Chúc mừng! Hồ sơ đăng ký đối tác của Quý doanh nghiệp đã được phê duyệt thành công.
           </p>
-          <p style="font-size: 14px; color: #666; font-style: italic; margin-top: 0; margin-bottom: 20px;">
-            Congratulations! Your B2B partner registration application has been successfully approved.
-          </p>
 
           <div style="
             background: #f0fdf4;
@@ -1209,9 +1240,21 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
             font-size: 15px;
             color: #333;
           ">
-            <p style="margin: 0;">Hiện tại, Quý khách đã có thể đăng nhập vào hệ thống B2B của OnePass để sử dụng dịch vụ.</p>
-            <p style="margin-top: 5px; font-style: italic; color: #666; font-size: 13px;">
-              You can now log in to the OnePass B2B system to use our services.
+            <p style="margin: 0 0 10px 0; font-weight: bold; font-size: 16px;">Thông tin đăng nhập hệ thống:</p>
+            
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 5px 0; width: 140px; color: #555;">Tên đăng nhập:</td>
+                <td style="padding: 5px 0; font-weight: bold; color: #000;">${pendingData.SoDKKD}</td>
+              </tr>
+              <tr>
+                <td style="padding: 5px 0; color: #555;">Mật khẩu:</td>
+                <td style="padding: 5px 0; font-weight: bold; color: #d32f2f;">${pendingData.MatKhau}</td>
+              </tr>
+            </table>
+
+            <p style="margin-top: 15px; font-style: italic; color: #666; font-size: 13px;">
+              * Vui lòng bảo mật thông tin này và đổi mật khẩu sau lần đăng nhập đầu tiên.
             </p>
           </div>
 
@@ -1232,16 +1275,14 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
 
           <p style="margin-top: 30px; font-size: 14px; color: #333; text-align: center;">
             Trân trọng,<br>
-            <span style="font-size: 13px; color: #666; font-style: italic;">Best regards,</span><br><br>
-            <strong>Đội ngũ OnePass</strong><br>
-            <span style="font-size: 13px; color: #666; font-style: italic;">OnePass Team</span>
+            <strong>Đội ngũ OnePass</strong>
           </p>
         </div>
       `;
 
       await sendEmailToCustomer(
         pendingData.Email, 
-        "OnePass - Hồ sơ đăng ký đối tác đã được duyệt | B2B Partner Registration Approved", 
+        "OnePass - Thông tin đăng nhập B2B | B2B Login Credentials", 
         emailContent
       );
       
