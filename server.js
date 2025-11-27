@@ -583,14 +583,14 @@ app.post("/api/b2b/forgot-password", async (req, res) => {
                style="
                  background-color: #2C4D9E; 
                  color: white; 
-                 padding: 12px 25px; 
+                 padding: 12px 30px; 
                  text-decoration: none; 
                  border-radius: 5px; 
-                 font-weight: bold;
-                 font-size: 16px;
                  display: inline-block;
+                 text-align: center;
                ">
-               Đặt lại mật khẩu / Reset Password
+               <span style="display: block; font-size: 16px; font-weight: bold; line-height: 120%;">Đặt lại mật khẩu</span>
+               <span style="display: block; font-size: 13px; font-weight: normal; font-style: italic; margin-top: 2px; opacity: 0.9;">Reset Password</span>
             </a>
           </div>
 
