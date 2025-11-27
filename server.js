@@ -729,23 +729,30 @@ app.put("/api/b2b/pending/:id", async (req, res) => {
     });
   }
 });
+// [SỬA] Tạo User (Email có thể null)
 app.post("/api/User", async (req, res) => {
   try {
     const { username, password, email, name, role } = req.body;
     
-    if (!username || !password || !email) {
-      return res.status(400).json({ success: false, message: "Thiếu thông tin bắt buộc" });
+    // Chỉ kiểm tra username và password, bỏ kiểm tra email
+    if (!username || !password) {
+      return res.status(400).json({ success: false, message: "Thiếu tên đăng nhập hoặc mật khẩu" });
     }
 
-    // [FIX] Kiểm tra xem email đã tồn tại chưa
-    const { data: existingUser, error: checkError } = await supabase
-      .from("User")
-      .select("id")
-      .eq("email", email)
-      .maybeSingle();
+    // Xử lý email: Nếu rỗng thì gán là null
+    const emailValue = email && email.trim() !== "" ? email.trim() : null;
 
-    if (existingUser) {
-      return res.status(400).json({ success: false, message: "Email này đã được sử dụng bởi tài khoản khác!" });
+    // Chỉ kiểm tra trùng email nếu email có giá trị (không phải null)
+    if (emailValue) {
+      const { data: existingUser } = await supabase
+        .from("User")
+        .select("id")
+        .eq("email", emailValue)
+        .maybeSingle();
+
+      if (existingUser) {
+        return res.status(400).json({ success: false, message: "Email này đã được sử dụng bởi tài khoản khác!" });
+      }
     }
 
     // Hash mật khẩu
@@ -759,7 +766,7 @@ app.post("/api/User", async (req, res) => {
       .from("User")
       .insert([{ 
         username, 
-        email, 
+        email: emailValue, 
         password_hash: hashedPassword, 
         name: name || username,
         is_admin,
@@ -774,9 +781,8 @@ app.post("/api/User", async (req, res) => {
     res.json({ success: true, message: "Tạo nhân viên thành công", data: data[0] });
   } catch (err) {
     console.error("❌ Lỗi tạo User:", err);
-    // Kiểm tra lại lần nữa nếu có lỗi DB trả về
     if (err.message && err.message.includes("User_email_key")) {
-       return res.status(400).json({ success: false, message: "Email đã tồn tại trong hệ thống." });
+       return res.status(400).json({ success: false, message: "Email đã tồn tại." });
     }
     res.status(500).json({ success: false, message: err.message });
   }
@@ -800,35 +806,32 @@ app.delete("/api/User/:id", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-// [CẬP NHẬT] Update User - Đã fix lỗi trùng Email rỗng
+
 app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
   try {
     const { id } = req.params;
     let { name, username, email, password, role } = req.body;
 
-    // 1. Kiểm tra Email bắt buộc
-    if (!email || email.trim() === "") {
-      return res.status(400).json({ success: false, message: "Email không được để trống!" });
-    }
     
-    email = email.trim(); // Xóa khoảng trắng thừa
+    const emailValue = email && email.trim() !== "" ? email.trim() : null;
 
-    // 2. Kiểm tra trùng Email (Loại trừ chính user đang sửa)
-    const { data: existingEmail } = await supabase
-      .from("User")
-      .select("id")
-      .eq("email", email)
-      .neq("id", id) // Quan trọng: Loại trừ ID hiện tại
-      .maybeSingle();
+    if (emailValue) {
+      const { data: existingEmail } = await supabase
+        .from("User")
+        .select("id")
+        .eq("email", emailValue)
+        .neq("id", id) 
+        .maybeSingle();
 
-    if (existingEmail) {
-      return res.status(400).json({ success: false, message: "Email này đã thuộc về người khác!" });
+      if (existingEmail) {
+        return res.status(400).json({ success: false, message: "Email này đã thuộc về người khác!" });
+      }
     }
 
     const updateData = {
       name,
       username,
-      email,
+      email: emailValue, // Lưu giá trị đã xử lý (null hoặc string)
       updated_at: new Date().toISOString()
     };
 
@@ -836,14 +839,14 @@ app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
       updateData.is_admin = role === "admin";
       updateData.is_director = role === "director";
       updateData.is_accountant = role === "accountant";
-      updateData.is_staff = role === "staff"; // Nếu có dùng role này
+      updateData.is_staff = role === "staff";
     }
 
     if (password && password.trim() !== "") {
       updateData.password_hash = await bcrypt.hash(password, 10);
     }
 
-    // Xử lý upload avatar (Giữ nguyên)
+    // // Xử lý upload avatar (Giữ nguyên)
     // if (req.file) {
     //   const fileExt = req.file.originalname.split(".").pop() || 'jpg';
     //   const fileName = `avatar_${id}_${Date.now()}.${fileExt}`;
@@ -875,7 +878,7 @@ app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
   } catch (err) {
     console.error("Error updating user:", err);
     if (err.message && err.message.includes("User_email_key")) {
-       return res.status(400).json({ success: false, message: "Email đã tồn tại trong hệ thống." });
+       return res.status(400).json({ success: false, message: "Email đã tồn tại." });
     }
     res.status(500).json({ success: false, message: err.message });
   }
