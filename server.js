@@ -11,6 +11,7 @@ import { PDFDocument, rgb } from "pdf-lib";
 import fetch from "node-fetch";
 import nodemailer from "nodemailer";
 import emailjs from '@emailjs/nodejs';
+import crypto from "crypto";
 dotenv.config();
 
 function translateServiceName(name) {
@@ -439,6 +440,178 @@ app.delete("/api/b2b/approved/:id", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
+app.post("/api/b2b/reset-password", async (req, res) => {
+  try {
+    const { token, SoDKKD, newPassword } = req.body;
+
+    if (!token || !SoDKKD || !newPassword) {
+      return res.status(400).json({ success: false, message: "Thiếu thông tin." });
+    }
+
+    // Kiểm tra token hợp lệ và chưa hết hạn
+    const { data: user, error } = await supabase
+      .from("B2B_APPROVED")
+      .select("ID, reset_token, reset_token_expiry")
+      .eq("SoDKKD", SoDKKD)
+      .eq("reset_token", token)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    if (!user) {
+      return res.status(400).json({ success: false, message: "Link không hợp lệ hoặc sai thông tin." });
+    }
+
+    const now = new Date();
+    const expiry = new Date(user.reset_token_expiry);
+
+    if (now > expiry) {
+      return res.status(400).json({ success: false, message: "Link đã hết hạn. Vui lòng yêu cầu lại." });
+    }
+
+    // Hash mật khẩu mới
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Cập nhật mật khẩu và xóa token
+    const { error: updateError } = await supabase
+      .from("B2B_APPROVED")
+      .update({ 
+        MatKhau: hashedPassword,
+        reset_token: null,
+        reset_token_expiry: null 
+      })
+      .eq("ID", user.ID);
+
+    if (updateError) throw updateError;
+
+    res.json({ success: true, message: "Đổi mật khẩu thành công. Vui lòng đăng nhập lại." });
+
+  } catch (err) {
+    console.error("❌ Reset Password Error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+app.post("/api/b2b/forgot-password", async (req, res) => {
+  try {
+    const { SoDKKD, Email } = req.body;
+
+    // Kiểm tra user có tồn tại và khớp email không
+    const { data: user, error } = await supabase
+      .from("B2B_APPROVED")
+      .select("ID, TenDoanhNghiep, Email, SoDKKD")
+      .eq("SoDKKD", SoDKKD)
+      .eq("Email", Email)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Thông tin không chính xác hoặc tài khoản chưa được duyệt." 
+      });
+    }
+
+    // Tạo token ngẫu nhiên
+    const token = crypto.randomBytes(32).toString("hex");
+    const expiry = new Date(Date.now() + 3600000); // Hết hạn sau 1 giờ
+
+    // Lưu token vào DB
+    const { error: updateError } = await supabase
+      .from("B2B_APPROVED")
+      .update({ 
+        reset_token: token, 
+        reset_token_expiry: expiry.toISOString() 
+      })
+      .eq("ID", user.ID);
+
+    if (updateError) throw updateError;
+
+    // Link reset
+    const frontendUrl = req.headers.origin || "https://b2bonepass.vercel.app";
+    const resetLink = `${frontendUrl}/reset-password?token=${token}&sodkkd=${SoDKKD}`;
+
+    // Gửi email với giao diện bạn yêu cầu
+    const emailContent = `
+      <div style="
+          max-width: 600px;
+          margin: auto;
+          padding: 20px;
+          font-family: 'Segoe UI', Arial, sans-serif;
+          border: 1px solid #e5e7eb;
+          border-radius: 10px;
+          background: #ffffff;
+        ">
+          <div style="text-align: center; border-bottom: 2px solid #2C4D9E; padding-bottom: 15px; margin-bottom: 20px;">
+            <h2 style="color: #2C4D9E; margin: 0; font-size: 22px;">
+              Yêu cầu đặt lại mật khẩu
+            </h2>
+            <h3 style="color: #666; margin: 5px 0 0 0; font-size: 16px; font-weight: normal; font-style: italic;">
+              Password Reset Request
+            </h3>
+          </div>
+
+          <p style="font-size: 16px; color: #333; margin-bottom: 20px;">
+            Xin chào <strong>${user.TenDoanhNghiep}</strong>,<br>
+            <span style="font-size: 14px; color: #666; font-style: italic;">Hello <strong>${user.TenDoanhNghiep}</strong>,</span>
+          </p>
+          
+          <p style="font-size: 15px; color: #333; margin-bottom: 2px;">
+            Chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản B2B (Số ĐKKD: <strong>${user.SoDKKD}</strong>).
+          </p>
+          <p style="font-size: 14px; color: #666; font-style: italic; margin-top: 0; margin-bottom: 20px;">
+            We received a request to reset the password for B2B account (Business Reg. No.: <strong>${user.SoDKKD}</strong>).
+          </p>
+
+          <div style="
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #2C4D9E;
+            margin-top: 15px;
+            font-size: 15px;
+            color: #333;
+          ">
+             <p style="margin: 0;">Vui lòng nhấn vào nút bên dưới để đặt mật khẩu mới (Link có hiệu lực trong 1 giờ):</p>
+             <p style="margin-top: 5px; font-style: italic; color: #666; font-size: 13px;">
+               Please click the button below to set a new password (Link valid for 1 hour):
+             </p>
+          </div>
+
+          <div style="margin-top: 30px; text-align: center;">
+            <a href="${resetLink}" 
+               style="
+                 background-color: #2C4D9E; 
+                 color: white; 
+                 padding: 12px 25px; 
+                 text-decoration: none; 
+                 border-radius: 5px; 
+                 font-weight: bold;
+                 font-size: 16px;
+                 display: inline-block;
+               ">
+               Đặt lại mật khẩu / Reset Password
+            </a>
+          </div>
+
+          <p style="margin-top: 30px; font-size: 14px; color: #333; text-align: center;">
+            Trân trọng,<br>
+            <span style="font-size: 13px; color: #666; font-style: italic;">Best regards,</span><br><br>
+            <strong>Đội ngũ OnePass</strong><br>
+            <span style="font-size: 13px; color: #666; font-style: italic;">OnePass Team</span>
+          </p>
+        </div>
+    `;
+
+    await sendEmailToCustomer(user.Email, "OnePass B2B - Đặt lại mật khẩu | Password Reset Request", emailContent);
+
+    res.json({ success: true, message: "Vui lòng kiểm tra email để đặt lại mật khẩu." });
+
+  } catch (err) {
+    console.error("❌ Forgot Password Error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
   try {
     const {
@@ -453,7 +626,7 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
       NganhNgheChinh 
     } = req.body;
 
-    
+    // 1. Chuẩn hóa dữ liệu đầu vào (Xóa khoảng trắng thừa)
     const cleanSoDKKD = SoDKKD ? SoDKKD.toString().trim() : "";
     const cleanEmail = Email ? Email.toString().trim() : "";
 
@@ -469,14 +642,16 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
       .maybeSingle();
 
     if (errApproved) throw errApproved;
+    
     if (existingApproved) {
       return res.status(400).json({
         success: false,
-        message: `Số ĐKKD ${cleanSoDKKD} đã tồn tại trong hệ thống (Doanh nghiệp: ${existingApproved.TenDoanhNghiep}).`
+        message: `Số ĐKKD ${cleanSoDKKD} đã tồn tại trong hệ thống (Doanh nghiệp: ${existingApproved.TenDoanhNghiep}). Vui lòng đăng nhập.`
       });
     }
 
-   
+    // 2.2 Kiểm tra trong bảng CHỜ DUYỆT (B2B_PENDING)
+    // Nếu tìm thấy => Đang chờ admin duyệt => Chặn đăng ký để tránh spam
     const { data: existingPending, error: errPending } = await supabase
       .from("B2B_PENDING")
       .select("ID")
@@ -484,6 +659,7 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
       .maybeSingle();
 
     if (errPending) throw errPending;
+
     if (existingPending) {
       return res.status(400).json({
         success: false,
@@ -496,7 +672,6 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
     let PdfPath = null;
     if (req.file) {
       const fileExt = req.file.originalname.split(".").pop();
-      // Đặt tên file theo SoDKKD để dễ quản lý
       const fileName = `b2b_${cleanSoDKKD}_${Date.now()}.${fileExt}`;
       
       const { error: uploadError } = await supabase.storage
@@ -514,8 +689,7 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
       }
     }
 
-
-    
+   
     const { data, error } = await supabase
       .from("B2B_PENDING")
       .insert([
@@ -523,7 +697,7 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
           TenDoanhNghiep,
           SoDKKD: cleanSoDKKD,
           Email: cleanEmail,
-          MatKhau: MatKhau,
+          MatKhau: MatKhau, 
           SoDienThoai,
           NguoiDaiDien,
           DichVu,
@@ -537,7 +711,6 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
     if (error) throw error;
     const newB2B = data[0]; 
 
-   
     if (global.io) {
       const notificationPayload = {
         YeuCauID: newB2B.ID,               
