@@ -453,48 +453,51 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
       NganhNgheChinh 
     } = req.body;
 
-    // ==================================================================
-    // 1. KIỂM TRA TRÙNG SỐ ĐKKD (QUAN TRỌNG)
-    // ==================================================================
     
-    // Kiểm tra trong bảng ĐÃ DUYỆT (B2B_APPROVED)
+    const cleanSoDKKD = SoDKKD ? SoDKKD.toString().trim() : "";
+    const cleanEmail = Email ? Email.toString().trim() : "";
+
+    if (!cleanSoDKKD) {
+      return res.status(400).json({ success: false, message: "Số ĐKKD không được để trống" });
+    }
+
+
     const { data: existingApproved, error: errApproved } = await supabase
       .from("B2B_APPROVED")
-      .select("ID")
-      .eq("SoDKKD", SoDKKD)
+      .select("ID, TenDoanhNghiep")
+      .eq("SoDKKD", cleanSoDKKD)
       .maybeSingle();
 
     if (errApproved) throw errApproved;
     if (existingApproved) {
       return res.status(400).json({
         success: false,
-        message: "Số ĐKKD này đã tồn tại trong hệ thống (Đã được duyệt)."
+        message: `Số ĐKKD ${cleanSoDKKD} đã tồn tại trong hệ thống (Doanh nghiệp: ${existingApproved.TenDoanhNghiep}).`
       });
     }
 
-    // Kiểm tra trong bảng CHỜ DUYỆT (B2B_PENDING)
+   
     const { data: existingPending, error: errPending } = await supabase
       .from("B2B_PENDING")
       .select("ID")
-      .eq("SoDKKD", SoDKKD)
+      .eq("SoDKKD", cleanSoDKKD)
       .maybeSingle();
 
     if (errPending) throw errPending;
     if (existingPending) {
       return res.status(400).json({
         success: false,
-        message: "Số ĐKKD này đang chờ phê duyệt. Vui lòng chờ phản hồi."
+        message: `Số ĐKKD ${cleanSoDKKD} đang chờ phê duyệt. Vui lòng chờ admin phản hồi.`
       });
     }
-    
-    // ==================================================================
-    // 2. NẾU KHÔNG TRÙNG THÌ TIẾP TỤC XỬ LÝ UPLOAD VÀ LƯU DATABASE
-    // ==================================================================
+
+
 
     let PdfPath = null;
     if (req.file) {
       const fileExt = req.file.originalname.split(".").pop();
-      const fileName = `b2b_${SoDKKD}_${Date.now()}.${fileExt}`;
+      // Đặt tên file theo SoDKKD để dễ quản lý
+      const fileName = `b2b_${cleanSoDKKD}_${Date.now()}.${fileExt}`;
       
       const { error: uploadError } = await supabase.storage
         .from("b2b_pdf") 
@@ -512,14 +515,15 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
     }
 
 
+    
     const { data, error } = await supabase
       .from("B2B_PENDING")
       .insert([
         {
           TenDoanhNghiep,
-          SoDKKD,
-          Email,
-          MatKhau: MatKhau, 
+          SoDKKD: cleanSoDKKD,
+          Email: cleanEmail,
+          MatKhau: MatKhau,
           SoDienThoai,
           NguoiDaiDien,
           DichVu,
@@ -533,16 +537,15 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
     if (error) throw error;
     const newB2B = data[0]; 
 
-    // Gửi Socket thông báo
+   
     if (global.io) {
-      console.log("📡 [Socket] Đang gửi thông báo B2B mới tới Admin...");
       const notificationPayload = {
         YeuCauID: newB2B.ID,               
         HoTen: `${TenDoanhNghiep}`,  
         TenDichVu: "Đăng ký Đối tác B2B",
         TenHinhThuc: "Form đăng ký",
         SoDienThoai: SoDienThoai,
-        Email: Email,
+        Email: cleanEmail,
         NgayTao: new Date().toISOString(),
         LoaiThongBao: "B2B_REGISTER"       
       };
