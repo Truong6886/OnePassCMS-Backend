@@ -1199,9 +1199,7 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
       if (servicesError) throw servicesError;
     }
 
-    // ============================================================
-    // 4. GỬI EMAIL THÔNG BÁO KÈM MẬT KHẨU GỐC
-    // ============================================================
+   
     try {
       const emailContent = `
         <div style="
@@ -1252,10 +1250,6 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
                 <td style="padding: 5px 0; font-weight: bold; color: #d32f2f;">${pendingData.MatKhau}</td>
               </tr>
             </table>
-
-            <p style="margin-top: 15px; font-style: italic; color: #666; font-size: 13px;">
-              * Vui lòng bảo mật thông tin này và đổi mật khẩu sau lần đăng nhập đầu tiên.
-            </p>
           </div>
 
           <div style="margin-top: 30px; text-align: center;">
