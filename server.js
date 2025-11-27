@@ -1675,6 +1675,7 @@ app.post("/api/b2b/approved-services/:soDKKD", async (req, res) => {
   }
 });
 
+// [SỬA] Đăng nhập B2B - Kiểm tra kỹ trạng thái duyệt
 app.post("/api/b2b/login", async (req, res) => {
   try {
     const { SoDKKD, MatKhau } = req.body;
@@ -1683,28 +1684,55 @@ app.post("/api/b2b/login", async (req, res) => {
       return res.status(400).json({ success: false, message: "Thiếu Số ĐKKD hoặc Mật khẩu" });
     }
 
-    // Tìm doanh nghiệp trong bảng đã duyệt
-    const { data: userData, error } = await supabase
+    
+    const { data: approvedUser, error: approvedError } = await supabase
       .from("B2B_APPROVED")
       .select("*")
       .eq("SoDKKD", SoDKKD)
       .maybeSingle();
 
-    if (error) throw error;
-    if (!userData) {
-      return res.status(404).json({ success: false, message: "Không tìm thấy doanh nghiệp" });
+    if (approvedError) throw approvedError;
+
+    // Nếu tìm thấy trong bảng đã duyệt -> Kiểm tra mật khẩu
+    if (approvedUser) {
+      const match = await bcrypt.compare(MatKhau, approvedUser.MatKhau);
+      if (!match) {
+        return res.status(401).json({ success: false, message: "Sai mật khẩu" });
+      }
+      return res.json({ success: true, message: "Đăng nhập thành công", data: approvedUser });
     }
 
+  
+    const { data: pendingUser } = await supabase
+      .from("B2B_PENDING")
+      .select("ID")
+      .eq("SoDKKD", SoDKKD)
+      .maybeSingle();
 
-    const match = await bcrypt.compare(MatKhau, userData.MatKhau);
-
-
-    if (!match) {
-      return res.status(401).json({ success: false, message: "Sai mật khẩu" });
+    if (pendingUser) {
+      return res.status(403).json({ 
+        success: false, 
+        message: "Tài khoản của bạn đang chờ Admin phê duyệt. Vui lòng quay lại sau." 
+      });
     }
 
+    
+    const { data: rejectedUser } = await supabase
+      .from("B2B_REJECTED")
+      .select("LyDoTuChoi")
+      .eq("SoDKKD", SoDKKD)
+      .maybeSingle();
 
-    res.json({ success: true, message: "Đăng nhập thành công", data: userData });
+    if (rejectedUser) {
+      return res.status(403).json({ 
+        success: false, 
+        message: `Hồ sơ đã bị từ chối. Lý do: ${rejectedUser.LyDoTuChoi || ""}` 
+      });
+    }
+
+  
+    return res.status(404).json({ success: false, message: "Tài khoản không tồn tại hoặc Số ĐKKD sai." });
+
   } catch (err) {
     console.error("❌ Lỗi login B2B:", err);
     res.status(500).json({ success: false, message: err.message });
