@@ -532,19 +532,20 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
             <h2 style="color: #2C4D9E; margin: 0; font-size: 22px;">
               Đăng ký tài khoản B2B thành công
             </h2>
-            <h3 style="color: #555; margin: 5px 0 0 0; font-size: 16px; font-weight: normal;">
+            <h3 style="color: #666; margin: 5px 0 0 0; font-size: 16px; font-weight: normal; font-style: italic;">
               Successful B2B Account Registration
             </h3>
           </div>
 
-          <p style="font-size: 16px; color: #333;">
-            Xin chào / Hello <strong>${TenDoanhNghiep}</strong>,
+          <p style="font-size: 16px; color: #333; margin-bottom: 20px;">
+            Xin chào <strong>${TenDoanhNghiep}</strong>,<br>
+            <span style="font-size: 14px; color: #666; font-style: italic;">Hello <strong>${TenDoanhNghiep}</strong>,</span>
           </p>
           
-          <p style="font-size: 15px; color: #333; margin-bottom: 5px;">
+          <p style="font-size: 15px; color: #333; margin-bottom: 2px;">
             Cảm ơn Quý doanh nghiệp đã đăng ký trở thành đối tác B2B của OnePass. Hồ sơ của Quý khách hiện đang ở trạng thái <strong>Chờ phê duyệt</strong>.
           </p>
-          <p style="font-size: 14px; color: #666; font-style: italic; margin-top: 0;">
+          <p style="font-size: 14px; color: #666; font-style: italic; margin-top: 0; margin-bottom: 20px;">
             Thank you for registering to become a OnePass B2B partner. Your profile is currently <strong>Pending Approval</strong>.
           </p>
 
@@ -557,14 +558,29 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
             font-size: 15px;
             color: #333;
           ">
-            <p style="margin: 5px 0;"><b>Số ĐKKD / Business Reg. No:</b> ${SoDKKD}</p>
-            <p style="margin: 5px 0;"><b>Người đại diện / Representative:</b> ${NguoiDaiDien}</p>
-            <p style="margin: 5px 0;"><b>Email đăng ký / Registered Email:</b> ${Email}</p>
-            <p style="margin: 5px 0;"><b>SĐT / Phone:</b> ${SoDienThoai || "N/A"}</p>
+            <div style="margin-bottom: 10px;">
+              <b>Số ĐKKD:</b> ${SoDKKD}<br>
+              <span style="font-size: 13px; color: #666; font-style: italic;">Business Reg. No: ${SoDKKD}</span>
+            </div>
+            
+            <div style="margin-bottom: 10px;">
+              <b>Người đại diện:</b> ${NguoiDaiDien}<br>
+              <span style="font-size: 13px; color: #666; font-style: italic;">Representative: ${NguoiDaiDien}</span>
+            </div>
+
+            <div style="margin-bottom: 10px;">
+              <b>Email đăng ký:</b> ${Email}<br>
+              <span style="font-size: 13px; color: #666; font-style: italic;">Registered Email: ${Email}</span>
+            </div>
+
+            <div>
+              <b>SĐT:</b> ${SoDienThoai || "N/A"}<br>
+              <span style="font-size: 13px; color: #666; font-style: italic;">Phone: ${SoDienThoai || "N/A"}</span>
+            </div>
           </div>
 
-          <div style="margin-top: 20px;">
-            <p style="font-size: 15px; color: #333; margin-bottom: 5px;">
+          <div style="margin-top: 25px;">
+            <p style="font-size: 15px; color: #333; margin-bottom: 2px;">
               Bộ phận quản lý sẽ kiểm tra và kích hoạt tài khoản trong thời gian sớm nhất. Quý khách sẽ nhận được email thông báo khi tài khoản được kích hoạt.
             </p>
             <p style="font-size: 14px; color: #666; font-style: italic; margin-top: 0;">
@@ -572,12 +588,15 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
             </p>
           </div>
 
-          <p style="margin-top: 25px; font-size: 13px; color: #6c757d; text-align: center;">
-            Trân trọng / Best regards,<br><strong>Đội ngũ OnePass / OnePass Team</strong>
+          <p style="margin-top: 30px; font-size: 14px; color: #333; text-align: center;">
+            Trân trọng,<br>
+            <span style="font-size: 13px; color: #666; font-style: italic;">Best regards,</span><br><br>
+            <strong>Đội ngũ OnePass</strong><br>
+            <span style="font-size: 13px; color: #666; font-style: italic;">OnePass Team</span>
           </p>
         </div>
       `;
-      await sendEmailToCustomer(Email, "OnePass - Xác nhận đăng ký B2B", emailContent);
+      await sendEmailToCustomer(Email, "OnePass - Xác nhận đăng ký B2B | B2B Registration Confirmation", emailContent);
     } catch (mailError) {
       console.error("⚠️ Lỗi gửi mail khách:", mailError);
     }
@@ -968,7 +987,7 @@ app.post("/api/b2b/pending/:id/reject", async (req, res) => {
 
    
     try {
-     const emailContent = `
+   const emailContent = `
         <div style="
           max-width: 600px;
           margin: auto;
@@ -982,37 +1001,25 @@ app.post("/api/b2b/pending/:id/reject", async (req, res) => {
             <h2 style="color: #ef4444; margin: 0; font-size: 22px;">
               Thông báo từ chối đăng ký B2B
             </h2>
-            <h3 style="color: #555; margin: 5px 0 0 0; font-size: 16px; font-weight: normal;">
+            <h3 style="color: #666; margin: 5px 0 0 0; font-size: 16px; font-weight: normal; font-style: italic;">
               B2B Registration Rejected
             </h3>
           </div>
 
-          <p style="font-size: 16px; color: #333;">
-            Xin chào / Hello <strong>${pendingData.TenDoanhNghiep}</strong>,
+          <p style="font-size: 16px; color: #333; margin-bottom: 20px;">
+            Xin chào <strong>${pendingData.TenDoanhNghiep}</strong>,<br>
+            <span style="font-size: 14px; color: #666; font-style: italic;">Hello <strong>${pendingData.TenDoanhNghiep}</strong>,</span>
           </p>
           
-          <p style="font-size: 15px; color: #333; margin-bottom: 5px;">
-            Chúng tôi rất tiếc phải thông báo rằng hồ sơ đăng ký đối tác B2B của Quý doanh nghiệp đã bị từ chối với lý do: <strong>${reason.trim()}</strong>.
+          <p style="font-size: 15px; color: #333; margin-bottom: 2px;">
+            Chúng tôi rất tiếc phải thông báo rằng hồ sơ đăng ký đối tác của Quý doanh nghiệp đã bị từ chối với lý do: <strong>${reason.trim()}</strong>.
           </p>
-          <p style="font-size: 14px; color: #666; font-style: italic; margin-top: 0;">
-            We regret to inform you that your B2B partner registration application has been rejected due to: <strong>${reason.trim()}</strong>.
+          <p style="font-size: 14px; color: #666; font-style: italic; margin-top: 0; margin-bottom: 20px;">
+            We regret to inform you that your partner registration application has been rejected due to: <strong>${reason.trim()}</strong>.
           </p>
 
-          <div style="
-            background: #fff5f5;
-            padding: 15px;
-            border-radius: 8px;
-            border-left: 4px solid #ef4444;
-            margin-top: 15px;
-            font-size: 15px;
-            color: #333;
-          ">
-            <p style="margin: 0; font-weight: bold; color: #b91c1c;">Chi tiết lý do / Reason detail:</p>
-            <p style="margin-top: 5px;">${reason.trim()}</p>
-          </div>
-
-          <div style="margin-top: 20px;">
-            <p style="font-size: 15px; color: #333; margin-bottom: 5px;">
+          <div style="margin-top: 25px;">
+            <p style="font-size: 15px; color: #333; margin-bottom: 2px;">
               Quý khách có thể cập nhật lại thông tin và gửi lại yêu cầu đăng ký mới, hoặc liên hệ với bộ phận hỗ trợ để biết thêm chi tiết.
             </p>
             <p style="font-size: 14px; color: #666; font-style: italic; margin-top: 0;">
@@ -1020,16 +1027,18 @@ app.post("/api/b2b/pending/:id/reject", async (req, res) => {
             </p>
           </div>
 
-          <p style="margin-top: 25px; font-size: 13px; color: #6c757d; text-align: center;">
-            Trân trọng / Best regards,<br><strong>Đội ngũ OnePass / OnePass Team</strong>
+          <p style="margin-top: 30px; font-size: 14px; color: #333; text-align: center;">
+            Trân trọng,<br>
+            <span style="font-size: 13px; color: #666; font-style: italic;">Best regards,</span><br><br>
+            <strong>Đội ngũ OnePass</strong><br>
+            <span style="font-size: 13px; color: #666; font-style: italic;">OnePass Team</span>
           </p>
         </div>
       `;
-
       // Gọi hàm gửi mail có sẵn trong code của bạn
       await sendEmailToCustomer(
         pendingData.Email, 
-        "OnePass - Thông báo kết quả đăng ký B2B", 
+        "OnePass - Thông báo từ chối đăng ký đối tác | B2B Registration Rejected", 
         emailContent
       );
       
@@ -1068,11 +1077,14 @@ app.get("/api/b2b/pending", async (req, res) => {
 
     if (error) throw error;
 
+    // --- SỬA ĐOẠN NÀY ---
     const mappedList = pendingList.map(item => ({
       ...item,
       DichVu: item.DichVu || "",
       DichVuKhac: item.DichVuKhac || "",
+      PdfPath: item.PdfPath || item.pdfpath || null 
     }));
+    // --------------------
 
     res.json({ 
       success: true, 
