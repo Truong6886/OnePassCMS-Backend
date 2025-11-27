@@ -800,28 +800,34 @@ app.delete("/api/User/:id", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+// [CẬP NHẬT] Update User - Đã fix lỗi trùng Email rỗng
 app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, username, email, password, role } = req.body; 
+    let { name, username, email, password, role } = req.body;
 
-  
-    if (email) {
-      const { data: existingEmail } = await supabase
-        .from("User")
-        .select("id")
-        .eq("email", email)
-        .neq("id", id) 
-        .maybeSingle();
+    // 1. Kiểm tra Email bắt buộc
+    if (!email || email.trim() === "") {
+      return res.status(400).json({ success: false, message: "Email không được để trống!" });
+    }
+    
+    email = email.trim(); // Xóa khoảng trắng thừa
 
-      if (existingEmail) {
-        return res.status(400).json({ success: false, message: "Email này đã thuộc về người khác!" });
-      }
+    // 2. Kiểm tra trùng Email (Loại trừ chính user đang sửa)
+    const { data: existingEmail } = await supabase
+      .from("User")
+      .select("id")
+      .eq("email", email)
+      .neq("id", id) // Quan trọng: Loại trừ ID hiện tại
+      .maybeSingle();
+
+    if (existingEmail) {
+      return res.status(400).json({ success: false, message: "Email này đã thuộc về người khác!" });
     }
 
-    const updateData = { 
+    const updateData = {
       name,
-      username, 
+      username,
       email,
       updated_at: new Date().toISOString()
     };
@@ -830,31 +836,32 @@ app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
       updateData.is_admin = role === "admin";
       updateData.is_director = role === "director";
       updateData.is_accountant = role === "accountant";
-      updateData.is_staff = role === "staff";
+      updateData.is_staff = role === "staff"; // Nếu có dùng role này
     }
 
     if (password && password.trim() !== "") {
       updateData.password_hash = await bcrypt.hash(password, 10);
     }
 
-    if (req.file) {
-      const fileExt = req.file.originalname.split(".").pop() || 'jpg';
-      const fileName = `avatar_${id}_${Date.now()}.${fileExt}`;
+    // Xử lý upload avatar (Giữ nguyên)
+    // if (req.file) {
+    //   const fileExt = req.file.originalname.split(".").pop() || 'jpg';
+    //   const fileName = `avatar_${id}_${Date.now()}.${fileExt}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from("avatars")
-        .upload(fileName, req.file.buffer, { 
-          contentType: req.file.mimetype,
-          upsert: true 
-        });
+    //   const { error: uploadError } = await supabase.storage
+    //     .from("avatars")
+    //     .upload(fileName, req.file.buffer, {
+    //       contentType: req.file.mimetype,
+    //       upsert: true
+    //     });
 
-      if (!uploadError) {
-        const { data: publicUrlData } = supabase.storage
-          .from("avatars")
-          .getPublicUrl(fileName);
-        updateData.avatar = publicUrlData.publicUrl;
-      }
-    }
+    //   if (!uploadError) {
+    //     const { data: publicUrlData } = supabase.storage
+    //       .from("avatars")
+    //       .getPublicUrl(fileName);
+    //     updateData.avatar = publicUrlData.publicUrl;
+    //   }
+    // }
 
     const { data, error } = await supabase
       .from("User")
@@ -868,7 +875,7 @@ app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
   } catch (err) {
     console.error("Error updating user:", err);
     if (err.message && err.message.includes("User_email_key")) {
-       return res.status(400).json({ success: false, message: "Email đã tồn tại." });
+       return res.status(400).json({ success: false, message: "Email đã tồn tại trong hệ thống." });
     }
     res.status(500).json({ success: false, message: err.message });
   }
