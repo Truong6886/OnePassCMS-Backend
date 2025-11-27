@@ -646,7 +646,7 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
     if (existingApproved) {
       return res.status(400).json({
         success: false,
-        message: `Số ĐKKD ${cleanSoDKKD} đã tồn tại trong hệ thống (Doanh nghiệp: ${existingApproved.TenDoanhNghiep}). Vui lòng đăng nhập.`
+        message: `Số ĐKKD ${cleanSoDKKD} đã tồn tại trong hệ thống (Doanh nghiệp: ${existingApproved.TenDoanhNghiep}).  vui lòng trở về trang đăng nhập.`
       });
     }
 
