@@ -922,7 +922,7 @@ app.post("/api/b2b/pending/:id/reject", async (req, res) => {
       });
     }
 
-
+    // 1. Lấy thông tin doanh nghiệp đang chờ (để lấy Email)
     const { data: pendingData, error: fetchError } = await supabase
       .from("B2B_PENDING")
       .select("*")
@@ -936,7 +936,7 @@ app.post("/api/b2b/pending/:id/reject", async (req, res) => {
       });
     }
 
-
+    // 2. Chuyển sang bảng B2B_REJECTED
     const { data: rejectedData, error: insertError } = await supabase
       .from("B2B_REJECTED")
       .insert([{
@@ -958,13 +958,85 @@ app.post("/api/b2b/pending/:id/reject", async (req, res) => {
 
     if (insertError) throw insertError;
 
-    // Xóa khỏi pending
+    // 3. Xóa khỏi B2B_PENDING
     const { error: deleteError } = await supabase
       .from("B2B_PENDING")
       .delete()
       .eq("ID", id);
 
     if (deleteError) throw deleteError;
+
+   
+    try {
+     const emailContent = `
+        <div style="
+          max-width: 600px;
+          margin: auto;
+          padding: 20px;
+          font-family: 'Segoe UI', Arial, sans-serif;
+          border: 1px solid #e5e7eb;
+          border-radius: 10px;
+          background: #ffffff;
+        ">
+          <div style="text-align: center; border-bottom: 2px solid #ef4444; padding-bottom: 15px; margin-bottom: 20px;">
+            <h2 style="color: #ef4444; margin: 0; font-size: 22px;">
+              Thông báo từ chối đăng ký B2B
+            </h2>
+            <h3 style="color: #555; margin: 5px 0 0 0; font-size: 16px; font-weight: normal;">
+              B2B Registration Rejected
+            </h3>
+          </div>
+
+          <p style="font-size: 16px; color: #333;">
+            Xin chào / Hello <strong>${pendingData.TenDoanhNghiep}</strong>,
+          </p>
+          
+          <p style="font-size: 15px; color: #333; margin-bottom: 5px;">
+            Chúng tôi rất tiếc phải thông báo rằng hồ sơ đăng ký đối tác B2B của Quý doanh nghiệp đã bị từ chối với lý do: <strong>${reason.trim()}</strong>.
+          </p>
+          <p style="font-size: 14px; color: #666; font-style: italic; margin-top: 0;">
+            We regret to inform you that your B2B partner registration application has been rejected due to: <strong>${reason.trim()}</strong>.
+          </p>
+
+          <div style="
+            background: #fff5f5;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #ef4444;
+            margin-top: 15px;
+            font-size: 15px;
+            color: #333;
+          ">
+            <p style="margin: 0; font-weight: bold; color: #b91c1c;">Chi tiết lý do / Reason detail:</p>
+            <p style="margin-top: 5px;">${reason.trim()}</p>
+          </div>
+
+          <div style="margin-top: 20px;">
+            <p style="font-size: 15px; color: #333; margin-bottom: 5px;">
+              Quý khách có thể cập nhật lại thông tin và gửi lại yêu cầu đăng ký mới, hoặc liên hệ với bộ phận hỗ trợ để biết thêm chi tiết.
+            </p>
+            <p style="font-size: 14px; color: #666; font-style: italic; margin-top: 0;">
+              You may update your information and submit a new registration request, or contact support for more details.
+            </p>
+          </div>
+
+          <p style="margin-top: 25px; font-size: 13px; color: #6c757d; text-align: center;">
+            Trân trọng / Best regards,<br><strong>Đội ngũ OnePass / OnePass Team</strong>
+          </p>
+        </div>
+      `;
+
+      // Gọi hàm gửi mail có sẵn trong code của bạn
+      await sendEmailToCustomer(
+        pendingData.Email, 
+        "OnePass - Thông báo kết quả đăng ký B2B", 
+        emailContent
+      );
+      
+    } catch (mailError) {
+      console.error("⚠️ Lỗi gửi mail từ chối cho khách:", mailError);
+      
+    }
 
     return res.json({
       success: true,
@@ -980,7 +1052,6 @@ app.post("/api/b2b/pending/:id/reject", async (req, res) => {
     });
   }
 });
-
 app.get("/api/b2b/pending", async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
