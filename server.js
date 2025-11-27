@@ -461,7 +461,7 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
       
       
       const { error: uploadError } = await supabase.storage
-        .from("b2b_docs") 
+        .from("b2b_pdf") 
         .upload(fileName, req.file.buffer, {
           contentType: req.file.mimetype,
           upsert: true,
@@ -469,7 +469,7 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
         
       if (!uploadError) {
         const { data: publicUrlData } = supabase.storage
-          .from("b2b_docs")
+          .from("b2b_pdf")
           .getPublicUrl(fileName);
         PdfPath = publicUrlData.publicUrl;
       }
