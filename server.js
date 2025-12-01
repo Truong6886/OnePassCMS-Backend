@@ -1383,7 +1383,6 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
         DoanhNghiepID: approvedId,
         TenDichVu: serviceName,
         NgayTao: new Date().toISOString(),
-        NgayCapNhat: new Date().toISOString()
       }));
 
       const { error: servicesError } = await supabase
@@ -1970,7 +1969,6 @@ app.post("/api/b2b/approved-services/:soDKKD", async (req, res) => {
           TienChietKhau: SoTienChietKhau,
           DoanhThuSauCK: DoanhThuSauChietKhau,
           NgayTao: new Date().toISOString(),
-          NgayCapNhat: new Date().toISOString()
         }
       ])
       .select()
