@@ -1574,14 +1574,28 @@ app.get("/api/b2b/services/wallet", async (req, res) => {
 // Thêm dịch vụ mới
 app.post("/api/b2b/services", async (req, res) => {
   try {
-    const { DoanhNghiepID, LoaiDichVu, MaDichVu, NgayThucHien,
-            NgayHoanThanh, DoanhThuTruocChietKhau, Vi } = req.body;
+    const { 
+      DoanhNghiepID, 
+      LoaiDichVu, 
+      TenDichVu,
+      MaDichVu, 
+      NgayThucHien,
+      NgayHoanThanh, 
+      DoanhThuTruocChietKhau, 
+      Vi,
+      // Các trường mới từ Form
+      ThuTucCapToc,   // Giá trị nhận từ Form (VD: "Yes", "No", true, false)
+      YeuCauHoaDon,   // Giá trị nhận từ Form (VD: "Yes", "No")
+      InvoiceUrl,
+      GhiChu,
+      NguoiPhuTrachId // ID của nhân viên phụ trách
+    } = req.body;
 
     if (!DoanhNghiepID || !LoaiDichVu || Vi == null) {
-      return res.status(400).json({ success: false, message: "Thiếu dữ liệu" });
+      return res.status(400).json({ success: false, message: "Thiếu dữ liệu bắt buộc" });
     }
 
-    // Lấy số dư ví hiện tại
+    // 1. Xử lý trừ tiền ví (Logic cũ)
     const { data: approved } = await supabase
       .from("B2B_APPROVED")
       .select("SoDuVi")
@@ -1594,31 +1608,46 @@ app.post("/api/b2b/services", async (req, res) => {
     if (SoDuMoi < 0)
       return res.status(400).json({ success: false, message: "Số dư ví không đủ" });
 
-    // Cập nhật số dư thực tế ở B2B_APPROVED
     await supabase
       .from("B2B_APPROVED")
       .update({ SoDuVi: SoDuMoi })
       .eq("ID", DoanhNghiepID);
 
-    // Lấy tổng doanh thu hiện tại để tính chiết khấu
+    // 2. Tính chiết khấu (Logic cũ)
     const { data: ds } = await supabase
       .from("B2B_SERVICES")
       .select("DoanhThuSauChietKhau")
       .eq("DoanhNghiepID", DoanhNghiepID);
 
     const totalCurrent = ds?.reduce((sum, i) => sum + (i.DoanhThuSauChietKhau || 0), 0) ?? 0;
-
     const { hang, chietKhau } = tinhHangVaChietKhau(totalCurrent);
+    
     const SoTienChietKhau = Math.round((DoanhThuTruocChietKhau * chietKhau) / 100);
     const DoanhThuSauChietKhau = DoanhThuTruocChietKhau - SoTienChietKhau;
 
+    // 3. Xử lý Logic Gói Dịch Vụ (Cấp tốc vs Thông thường)
+    // Nếu ThuTucCapToc là "Yes", "true" hoặc true => Lưu là "Cấp tốc"
+    // Ngược lại => "Thông thường"
+    let finalGoiDichVu = "Thông thường";
+    if (ThuTucCapToc === "Yes" || ThuTucCapToc === "true" || ThuTucCapToc === true || ThuTucCapToc === "Có") {
+        finalGoiDichVu = "Cấp tốc";
+    }
+
+    // 4. Insert vào Supabase
     const { data, error } = await supabase
       .from("B2B_SERVICES")
       .insert([{
         DoanhNghiepID,
         LoaiDichVu,
-        TenDichVu: req.body.TenDichVu || "",
+        TenDichVu: TenDichVu || "",
         ServiceID: MaDichVu,
+        GoiDichVu: finalGoiDichVu, 
+        YeuCauHoaDon: YeuCauHoaDon || "Không",
+        InvoiceUrl: InvoiceUrl || null,
+        GhiChu: GhiChu || "",
+        NguoiPhuTrachId: NguoiPhuTrachId || null, 
+        // ----------------------------------
+
         NgayThucHien,
         NgayHoanThanh,
         DoanhThuTruocChietKhau,
@@ -1639,7 +1668,6 @@ app.post("/api/b2b/services", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-
 
 app.put("/api/b2b/services/update/:id", async (req, res) => {
   try {
