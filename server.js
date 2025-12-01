@@ -13,20 +13,76 @@ import nodemailer from "nodemailer";
 import emailjs from '@emailjs/nodejs';
 import crypto from "crypto";
 dotenv.config();
-
-function translateServiceName(name) {
-  const map = {
-    "인증 센터": "Chứng thực",
-    "결혼 이민": "Kết hôn",
-    "출생신고 대행": "Khai sinh, khai tử",
-    "출입국 행정 대행": "Xuất nhập cảnh",
-    "신분증명 서류 대행": "Giấy tờ tuỳ thân",
-    "입양 절차 대행": "Nhận nuôi",
-    "비자 대행": "Thị thực",
-    "법률 컨설팅": "Tư vấn pháp lý",
-    "B2B 서비스": "Dịch vụ B2B",
-    "기타": "Khác",
+async function generateServiceCode(supabase, loaiDichVu, yeuCauHoaDon) {
+  // 1. Map ký tự viết tắt
+  const typeMap = {
+    "Hộ chiếu": "HC",
+    "Visa": "VS",
+    "Giấy phép": "GP",
+    "Kết hôn": "KH",
+    "Lý lịch tư pháp": "LL",
+    "Thẻ tạm trú": "TR",
+    "Gia hạn visa": "GH",
+    "Cấp lại hộ chiếu": "HC", 
+    "Khác": "OT"
   };
+  
+ 
+  let prefix = "OT";
+  const cleanLoaiDichVu = loaiDichVu ? loaiDichVu.trim() : "";
+  
+  for (const [key, value] of Object.entries(typeMap)) {
+    if (cleanLoaiDichVu.toLowerCase().includes(key.toLowerCase())) {
+      prefix = value;
+      break;
+    }
+  }
+
+ 
+  const now = new Date();
+  const dateStr = new Intl.DateTimeFormat('en-GB', { 
+    year: '2-digit', 
+    month: '2-digit', 
+    day: '2-digit', 
+    timeZone: 'Asia/Ho_Chi_Minh' 
+  }).format(now).split('/').reverse().join(''); 
+
+ 
+  const invoiceCode = (yeuCauHoaDon === "Yes" || yeuCauHoaDon === "Có") ? "Y" : "N";
+
+  const startOfDay = new Date(now.setHours(0,0,0,0)).toISOString();
+  const endOfDay = new Date(now.setHours(23,59,59,999)).toISOString();
+
+  const { count, error } = await supabase
+    .from("B2B_SERVICES")
+    .select("*", { count: "exact", head: true })
+    .gte("CreatedAt", startOfDay)
+    .lte("CreatedAt", endOfDay);
+
+  if (error) {
+    console.error("Lỗi đếm dịch vụ trong ngày:", error);
+    return `${prefix}-${dateStr}-${invoiceCode}-001`; // Fallback
+  }
+
+  const nextSequence = (count || 0) + 1;
+  const sequenceStr = String(nextSequence).padStart(3, "0"); // 001, 002...
+
+  // 5. Kết hợp
+  return `${prefix}-${dateStr}-${invoiceCode}-${sequenceStr}`;
+}
+function translateServiceName(name) {
+    const map = {
+      "인증 센터": "Chứng thực",
+      "결혼 이민": "Kết hôn",
+      "출생신고 대행": "Khai sinh, khai tử",
+      "출입국 행정 대행": "Xuất nhập cảnh",
+      "신분증명 서류 대행": "Giấy tờ tuỳ thân",
+      "입양 절차 대행": "Nhận nuôi",
+      "비자 대행": "Thị thực",
+      "법률 컨설팅": "Tư vấn pháp lý",
+      "B2B 서비스": "Dịch vụ B2B",
+      "기타": "Khác",
+    };
 
   return map[name?.trim()] || name?.trim() || "";
 }
@@ -1508,7 +1564,10 @@ app.get("/api/b2b/services", async (req, res) => {
 
     let query = supabase
       .from("B2B_SERVICES")
-      .select("*", { count: "exact" });
+     .select(`
+        *,
+        NguoiPhuTrach:User!NguoiPhuTrachId (id, name, username)
+      `, { count: "exact" });
 
     if (DoanhNghiepID) query = query.eq("DoanhNghiepID", DoanhNghiepID);
 
@@ -1532,8 +1591,8 @@ app.get("/api/b2b/services", async (req, res) => {
       DoanhThuSauChietKhau: item.DoanhThuSauChietKhau,
       TongDoanhThuTichLuy: item.TongDoanhThuTichLuy,
       Vi: item.Vi,
+      NguoiPhuTrach: item.NguoiPhuTrach ? item.NguoiPhuTrach.name : ""
     }));
-
     res.json({
       success: true,
       data: formattedData,
@@ -1577,8 +1636,8 @@ app.post("/api/b2b/services", async (req, res) => {
     const { 
       DoanhNghiepID, 
       LoaiDichVu, 
-      TenDichVu,
-      MaDichVu, 
+      TenDichVu, 
+      MaDichVu, // Frontend có thể gửi rỗng
       NgayThucHien,
       NgayHoanThanh, 
       DoanhThuTruocChietKhau, 
@@ -1594,7 +1653,7 @@ app.post("/api/b2b/services", async (req, res) => {
       return res.status(400).json({ success: false, message: "Thiếu dữ liệu bắt buộc" });
     }
 
-    // 1. Xử lý trừ tiền ví (Giữ nguyên)
+    // 1. Xử lý trừ tiền ví (Giữ nguyên logic cũ)
     const { data: approved } = await supabase
       .from("B2B_APPROVED")
       .select("SoDuVi")
@@ -1612,7 +1671,7 @@ app.post("/api/b2b/services", async (req, res) => {
       .update({ SoDuVi: SoDuMoi })
       .eq("ID", DoanhNghiepID);
 
-    // 2. Tính chiết khấu (Giữ nguyên)
+    // 2. Tính chiết khấu (Giữ nguyên logic cũ)
     const { data: ds } = await supabase
       .from("B2B_SERVICES")
       .select("DoanhThuSauChietKhau")
@@ -1624,22 +1683,29 @@ app.post("/api/b2b/services", async (req, res) => {
     const SoTienChietKhau = Math.round((DoanhThuTruocChietKhau * chietKhau) / 100);
     const DoanhThuSauChietKhau = DoanhThuTruocChietKhau - SoTienChietKhau;
 
-    // 3. Xử lý Logic Gói Dịch Vụ
+    // [NEW] 3. Xử lý Gói Dịch Vụ
     let finalGoiDichVu = "Thông thường";
     if (ThuTucCapToc === "Yes" || ThuTucCapToc === "true" || ThuTucCapToc === true || ThuTucCapToc === "Có") {
         finalGoiDichVu = "Cấp tốc";
     }
 
-    // 4. Insert vào Supabase
+    // [NEW] 4. TỰ ĐỘNG SINH MÃ DỊCH VỤ (Nếu chưa có)
+    let finalMaDichVu = MaDichVu;
+    if (!finalMaDichVu) {
+       // Gọi hàm helper vừa tạo
+       finalMaDichVu = await generateServiceCode(supabase, LoaiDichVu, YeuCauHoaDon);
+    }
+
+    // 5. Insert vào Supabase
     const { data, error } = await supabase
       .from("B2B_SERVICES")
       .insert([{
         DoanhNghiepID,
         LoaiDichVu,
         TenDichVu: TenDichVu || "",
-        ServiceID: MaDichVu,
+        ServiceID: finalMaDichVu, 
         GoiDichVu: finalGoiDichVu, 
-        YeuCauHoaDon: YeuCauHoaDon || "",
+        YeuCauHoaDon: YeuCauHoaDon || "No",
         InvoiceUrl: InvoiceUrl || null,
         GhiChu: GhiChu || "",
         NguoiPhuTrachId: NguoiPhuTrachId || null, 
@@ -1651,6 +1717,7 @@ app.post("/api/b2b/services", async (req, res) => {
         SoTienChietKhau,
         DoanhThuSauChietKhau,
         Vi,
+        TongDoanhThuTichLuy: totalCurrent + DoanhThuSauChietKhau, 
         CreatedAt: new Date().toISOString()
       }])
       .select()
@@ -1711,13 +1778,18 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
 
     const SoTienChietKhau = Math.round((DoanhThuTruocChietKhau * chietKhau) / 100);
     const DoanhThuSauChietKhau = DoanhThuTruocChietKhau - SoTienChietKhau;
-
+    let finalMaDichVu = MaDichVu;
+    if (!finalMaDichVu && (Vi > 0 || DoanhThuTruocChietKhau > 0)) {
+        // Cần lấy thông tin YeuCauHoaDon từ bản ghi hiện tại hoặc req.body nếu có update
+        const YeuCauHoaDon = current.YeuCauHoaDon || "No"; 
+        finalMaDichVu = await generateServiceCode(supabase, LoaiDichVu, YeuCauHoaDon);
+    }
     const { data, error } = await supabase
       .from("B2B_SERVICES")
       .update({
         LoaiDichVu,
         TenDichVu,
-        ServiceID: MaDichVu,
+        ServiceID: finalMaDichVu,
         NgayThucHien,
         NgayHoanThanh,
         Vi,
