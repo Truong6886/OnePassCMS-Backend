@@ -1583,19 +1583,18 @@ app.post("/api/b2b/services", async (req, res) => {
       NgayHoanThanh, 
       DoanhThuTruocChietKhau, 
       Vi,
-      // Các trường mới từ Form
-      ThuTucCapToc,   // Giá trị nhận từ Form (VD: "Yes", "No", true, false)
-      YeuCauHoaDon,   // Giá trị nhận từ Form (VD: "Yes", "No")
+      ThuTucCapToc,   
+      YeuCauHoaDon,   
       InvoiceUrl,
       GhiChu,
-      NguoiPhuTrachId // ID của nhân viên phụ trách
+      NguoiPhuTrachId 
     } = req.body;
 
     if (!DoanhNghiepID || !LoaiDichVu || Vi == null) {
       return res.status(400).json({ success: false, message: "Thiếu dữ liệu bắt buộc" });
     }
 
-    // 1. Xử lý trừ tiền ví (Logic cũ)
+    // 1. Xử lý trừ tiền ví (Giữ nguyên)
     const { data: approved } = await supabase
       .from("B2B_APPROVED")
       .select("SoDuVi")
@@ -1613,7 +1612,7 @@ app.post("/api/b2b/services", async (req, res) => {
       .update({ SoDuVi: SoDuMoi })
       .eq("ID", DoanhNghiepID);
 
-    // 2. Tính chiết khấu (Logic cũ)
+    // 2. Tính chiết khấu (Giữ nguyên)
     const { data: ds } = await supabase
       .from("B2B_SERVICES")
       .select("DoanhThuSauChietKhau")
@@ -1625,9 +1624,7 @@ app.post("/api/b2b/services", async (req, res) => {
     const SoTienChietKhau = Math.round((DoanhThuTruocChietKhau * chietKhau) / 100);
     const DoanhThuSauChietKhau = DoanhThuTruocChietKhau - SoTienChietKhau;
 
-    // 3. Xử lý Logic Gói Dịch Vụ (Cấp tốc vs Thông thường)
-    // Nếu ThuTucCapToc là "Yes", "true" hoặc true => Lưu là "Cấp tốc"
-    // Ngược lại => "Thông thường"
+    // 3. Xử lý Logic Gói Dịch Vụ
     let finalGoiDichVu = "Thông thường";
     if (ThuTucCapToc === "Yes" || ThuTucCapToc === "true" || ThuTucCapToc === true || ThuTucCapToc === "Có") {
         finalGoiDichVu = "Cấp tốc";
@@ -1642,14 +1639,13 @@ app.post("/api/b2b/services", async (req, res) => {
         TenDichVu: TenDichVu || "",
         ServiceID: MaDichVu,
         GoiDichVu: finalGoiDichVu, 
-        YeuCauHoaDon: YeuCauHoaDon || "Không",
+        YeuCauHoaDon: YeuCauHoaDon || "",
         InvoiceUrl: InvoiceUrl || null,
         GhiChu: GhiChu || "",
         NguoiPhuTrachId: NguoiPhuTrachId || null, 
-        // ----------------------------------
-
         NgayThucHien,
-        NgayHoanThanh,
+        NgayHoanThanh: NgayHoanThanh || null, 
+        
         DoanhThuTruocChietKhau,
         MucChietKhau: chietKhau,
         SoTienChietKhau,
