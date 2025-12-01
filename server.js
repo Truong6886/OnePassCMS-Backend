@@ -619,6 +619,7 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
       SoDKKD,
       Email,
       MatKhau,
+      MaVung,
       SoDienThoai,
       NguoiDaiDien,
       DichVu,
@@ -697,7 +698,8 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
           TenDoanhNghiep,
           SoDKKD: cleanSoDKKD,
           Email: cleanEmail,
-          MatKhau: MatKhau, 
+          MatKhau: MatKhau,
+          MaVung: MaVung,
           SoDienThoai,
           NguoiDaiDien,
           DichVu,
@@ -897,9 +899,10 @@ app.put("/api/b2b/pending/:id", async (req, res) => {
       TenDoanhNghiep, 
       SoDKKD, 
       NguoiDaiDien, 
+      MaVung,
       DichVu, 
       DichVuKhac,
-      PdfPath
+      PdfPath,
     } = req.body;
 
     // Validate required fields
@@ -932,6 +935,7 @@ app.put("/api/b2b/pending/:id", async (req, res) => {
         SoDKKD: SoDKKD.trim(),
         NguoiDaiDien: NguoiDaiDien?.trim() || "",
         DichVu: DichVu?.trim() || "",
+        MaVung: MaVung || "",
         DichVuKhac: DichVuKhac?.trim() || "",
         PdfPath: PdfPath || null
       })
@@ -1169,6 +1173,7 @@ app.post("/api/b2b/pending/:id/reject", async (req, res) => {
         TenDoanhNghiep: pendingData.TenDoanhNghiep,
         SoDKKD: pendingData.SoDKKD,
         Email: pendingData.Email,
+        MaVung: pendingData.MaVung,
         SoDienThoai: pendingData.SoDienThoai,
         NguoiDaiDien: pendingData.NguoiDaiDien,
         DichVu: pendingData.DichVu || "",
@@ -1873,6 +1878,7 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
           SoDKKD: pendingData.SoDKKD,
           MatKhau: pendingData.MatKhau,
           Email: pendingData.Email,
+          MaVung: pendingData.MaVung,
           SoDienThoai: pendingData.SoDienThoai,
           NguoiDaiDien: pendingData.NguoiDaiDien,
           NganhNgheChinh: pendingData.NganhNgheChinh || "",
