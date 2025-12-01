@@ -620,6 +620,7 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
       Email,
       MatKhau,
       MaVung,
+      Website,
       SoDienThoai,
       NguoiDaiDien,
       DichVu,
@@ -701,6 +702,7 @@ app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
           MatKhau: MatKhau,
           MaVung: MaVung,
           SoDienThoai,
+          Website: Website || null,
           NguoiDaiDien,
           DichVu,
           DichVuKhac,
@@ -903,6 +905,7 @@ app.put("/api/b2b/pending/:id", async (req, res) => {
       DichVu, 
       DichVuKhac,
       PdfPath,
+      Website
     } = req.body;
 
     // Validate required fields
@@ -936,6 +939,7 @@ app.put("/api/b2b/pending/:id", async (req, res) => {
         NguoiDaiDien: NguoiDaiDien?.trim() || "",
         DichVu: DichVu?.trim() || "",
         MaVung: MaVung || "",
+        Website: Website || null,
         DichVuKhac: DichVuKhac?.trim() || "",
         PdfPath: PdfPath || null
       })
@@ -1174,6 +1178,7 @@ app.post("/api/b2b/pending/:id/reject", async (req, res) => {
         SoDKKD: pendingData.SoDKKD,
         Email: pendingData.Email,
         MaVung: pendingData.MaVung,
+        Website: pendingData.Website,
         SoDienThoai: pendingData.SoDienThoai,
         NguoiDaiDien: pendingData.NguoiDaiDien,
         DichVu: pendingData.DichVu || "",
@@ -1344,6 +1349,8 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
           SoDKKD: pendingData.SoDKKD,
           MatKhau: hashedPassword, // Lưu mật khẩu đã mã hóa để login
           Email: pendingData.Email,
+          MaVung: pendingData.MaVung,
+          Website: pendingData.Website,
           SoDienThoai: pendingData.SoDienThoai,
           NguoiDaiDien: pendingData.NguoiDaiDien,
           NganhNgheChinh: pendingData.NganhNgheChinh || "",
@@ -1847,93 +1854,6 @@ app.get("/api/b2b/approved", async (req, res) => {
   } catch (err) {
     console.error("Error fetching B2B_APPROVED:", err);
     res.status(500).json({ success: false, message: err.message });
-  }
-});
-app.post("/api/b2b/approve/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const { data: pendingData, error: pendingError } = await supabase
-      .from("B2B_PENDING")
-      .select("*")
-      .eq("ID", id)
-      .maybeSingle();
-
-    if (pendingError) throw pendingError;
-    if (!pendingData) {
-      return res.status(404).json({
-        success: false,
-        message: "Không tìm thấy doanh nghiệp"
-      });
-    }
-
-    const dichVuNames = pendingData.DichVu || "";
-
-    // Chèn vào bảng APPROVED
-    const { data: approvedData, error: insertError } = await supabase
-      .from("B2B_APPROVED")
-      .insert([
-        {
-          TenDoanhNghiep: pendingData.TenDoanhNghiep,
-          SoDKKD: pendingData.SoDKKD,
-          MatKhau: pendingData.MatKhau,
-          Email: pendingData.Email,
-          MaVung: pendingData.MaVung,
-          SoDienThoai: pendingData.SoDienThoai,
-          NguoiDaiDien: pendingData.NguoiDaiDien,
-          NganhNgheChinh: pendingData.NganhNgheChinh || "",
-          DiaChi: pendingData.DiaChi || null,
-          DichVu: dichVuNames,
-          DichVuKhac: pendingData.DichVuKhac || "",
-          PdfPath: pendingData.PdfPath || "",
-          TongDoanhThu: pendingData.TongDoanhThu || 0,
-          XepHang: pendingData.XepHang || "",
-        }
-      ])
-      .select()
-      .single();
-
-    if (insertError) throw insertError;
-
-    const approvedId = approvedData.ID;
-
-    // CHÈN TẤT CẢ DỊCH VỤ VÀO BẢNG B2B_APPROVED_SERVICES
-    if (dichVuNames) {
-      const servicesArray = dichVuNames.split(",").map(dv => dv.trim());
-      
-      const servicesToInsert = servicesArray.map(serviceName => ({
-        DoanhNghiepID: approvedId,
-        TenDichVu: serviceName,
-        NgayTao: new Date().toISOString(),
-        NgayCapNhat: new Date().toISOString()
-      }));
-
-      const { error: servicesError } = await supabase
-        .from("B2B_APPROVED_SERVICES")
-        .insert(servicesToInsert);
-
-      if (servicesError) throw servicesError;
-    }
-
-    // Xóa pending
-    const { error: deleteError } = await supabase
-      .from("B2B_PENDING")
-      .delete()
-      .eq("ID", id);
-
-    if (deleteError) throw deleteError;
-
-    return res.json({
-      success: true,
-      message: "Duyệt doanh nghiệp thành công"
-    });
-
-  } catch (err) {
-    console.error("❌ Lỗi duyệt B2B:", err);
-    return res.status(500).json({
-      success: false,
-      message: err.message
-    });
   }
 });
 
