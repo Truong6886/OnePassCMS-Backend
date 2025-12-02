@@ -14,60 +14,70 @@ import emailjs from '@emailjs/nodejs';
 import crypto from "crypto";
 dotenv.config();
 async function generateServiceCode(supabase, loaiDichVu, yeuCauHoaDon) {
-  // 1. Map ký tự viết tắt
+  // Map mã dịch vụ theo yêu cầu (9 loại + tách Khai tử)
   const typeMap = {
-    "Hộ chiếu": "HC",
-    "Visa": "VS",
-    "Giấy phép": "GP",
+    "Chứng thực": "CT",
     "Kết hôn": "KH",
-    "Lý lịch tư pháp": "LL",
-    "Thẻ tạm trú": "TR",
-    "Gia hạn visa": "GH",
-    "Cấp lại hộ chiếu": "HC", 
+    "Khai sinh": "KS",
+    "Khai tử": "KT", 
+    "Xuất nhập cảnh": "XNC",
+    "Giấy tờ tuỳ thân": "GT",
+    "Nhận nuôi": "NN",
+    "Thị thực": "TT",
+    "Tư vấn pháp lý": "TV",
+    "Dịch vụ B2B": "B2B",
     "Khác": "OT"
   };
   
- 
   let prefix = "OT";
   const cleanLoaiDichVu = loaiDichVu ? loaiDichVu.trim() : "";
   
+  // Logic tìm prefix: So khớp chính xác hoặc chứa từ khóa
   for (const [key, value] of Object.entries(typeMap)) {
+    // Nếu loại dịch vụ chứa từ khóa (ví dụ: "Khai tử trọn gói" -> chứa "Khai tử")
     if (cleanLoaiDichVu.toLowerCase().includes(key.toLowerCase())) {
       prefix = value;
       break;
     }
   }
 
- 
+
   const now = new Date();
-  const dateStr = new Intl.DateTimeFormat('en-GB', { 
-    year: '2-digit', 
-    month: '2-digit', 
-    day: '2-digit', 
-    timeZone: 'Asia/Ho_Chi_Minh' 
-  }).format(now).split('/').reverse().join(''); 
+  const yy = now.getFullYear().toString().slice(-2);
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const dateStr = `${yy}${mm}${dd}`; 
 
- 
-  const invoiceCode = (yeuCauHoaDon === "Yes" || yeuCauHoaDon === "Có") ? "Y" : "N";
+  // 3. Mã hóa đơn (Y/N)
+  // Check các trường hợp: "Yes", "Có", "true"
+  const isInvoice = ["yes", "có", "true"].includes(String(yeuCauHoaDon).toLowerCase());
+  const invoiceCode = isInvoice ? "Y" : "N";
 
-  const startOfDay = new Date(now.setHours(0,0,0,0)).toISOString();
-  const endOfDay = new Date(now.setHours(23,59,59,999)).toISOString();
 
-  const { count, error } = await supabase
+  const searchString = `${prefix}-${dateStr}-%`; 
+
+  const { data: lastRecord, error } = await supabase
     .from("B2B_SERVICES")
-    .select("*", { count: "exact", head: true })
-    .gte("CreatedAt", startOfDay)
-    .lte("CreatedAt", endOfDay);
+    .select("ServiceID")
+    .like("ServiceID", searchString)
+    .order("ServiceID", { ascending: false }) // Lấy cái mới nhất
+    .limit(1)
+    .maybeSingle();
 
-  if (error) {
-    console.error("Lỗi đếm dịch vụ trong ngày:", error);
-    return `${prefix}-${dateStr}-${invoiceCode}-001`; // Fallback
+  let nextSequence = 1;
+
+  if (lastRecord && lastRecord.ServiceID) {
+    // Tách chuỗi: HC-251130-Y-002 -> Lấy 002
+    const parts = lastRecord.ServiceID.split('-');
+    const lastNum = parseInt(parts[parts.length - 1]);
+    if (!isNaN(lastNum)) {
+      nextSequence = lastNum + 1;
+    }
   }
 
-  const nextSequence = (count || 0) + 1;
-  const sequenceStr = String(nextSequence).padStart(3, "0"); // 001, 002...
+  const sequenceStr = String(nextSequence).padStart(3, "0"); // 1 -> 001
 
-  // 5. Kết hợp
+  
   return `${prefix}-${dateStr}-${invoiceCode}-${sequenceStr}`;
 }
 function translateServiceName(name) {
@@ -1554,6 +1564,9 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
   }
 });
 // Lấy danh sách dịch vụ
+// ... (Các import và setup giữ nguyên)
+
+// [CẬP NHẬT] Lấy danh sách dịch vụ kèm Số ĐKKD và Người phụ trách
 app.get("/api/b2b/services", async (req, res) => {
   try {
     const { page, limit, DoanhNghiepID } = req.query;
@@ -1564,8 +1577,10 @@ app.get("/api/b2b/services", async (req, res) => {
 
     let query = supabase
       .from("B2B_SERVICES")
-     .select(`
+      // JOIN thêm bảng B2B_APPROVED để lấy SoDKKD
+      .select(`
         *,
+        DoanhNghiep:B2B_APPROVED!DoanhNghiepID (SoDKKD, TenDoanhNghiep),
         NguoiPhuTrach:User!NguoiPhuTrachId (id, name, username)
       `, { count: "exact" });
 
@@ -1580,9 +1595,13 @@ app.get("/api/b2b/services", async (req, res) => {
     const formattedData = data.map(item => ({
       ID: item.STT,
       DoanhNghiepID: item.DoanhNghiepID,
+      SoDKKD: item.DoanhNghiep?.SoDKKD || "", 
       MaDichVu: item.ServiceID,
       LoaiDichVu: item.LoaiDichVu,
       TenDichVu: item.TenDichVu,
+      GoiDichVu: item.GoiDichVu || "", 
+      YeuCauHoaDon: item.YeuCauHoaDon || "",     
+      InvoiceUrl: item.InvoiceUrl || "",           
       NgayThucHien: item.NgayThucHien,
       NgayHoanThanh: item.NgayHoanThanh,
       DoanhThuTruocChietKhau: item.DoanhThuTruocChietKhau,
@@ -1591,8 +1610,14 @@ app.get("/api/b2b/services", async (req, res) => {
       DoanhThuSauChietKhau: item.DoanhThuSauChietKhau,
       TongDoanhThuTichLuy: item.TongDoanhThuTichLuy,
       Vi: item.Vi,
-      NguoiPhuTrach: item.NguoiPhuTrach ? item.NguoiPhuTrach.name : ""
+      NguoiPhuTrachId: item.NguoiPhuTrachId,
+      
+      
+      NguoiPhuTrach: item.NguoiPhuTrach || null, 
+      NguoiPhuTrachName: item.NguoiPhuTrach ? item.NguoiPhuTrach.name : "" 
+      // --------------------
     }));
+
     res.json({
       success: true,
       data: formattedData,
@@ -1605,7 +1630,6 @@ app.get("/api/b2b/services", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-
 // Lấy ví và hạng của doanh nghiệp
 app.get("/api/b2b/services/wallet", async (req, res) => {
   try {
@@ -1735,7 +1759,8 @@ app.post("/api/b2b/services", async (req, res) => {
 app.put("/api/b2b/services/update/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { LoaiDichVu, TenDichVu, MaDichVu, NgayThucHien, NgayHoanThanh, DoanhThuTruocChietKhau, Vi } = req.body;
+    // Nhận thêm YeuCauHoaDon từ body để sinh mã chính xác
+    const { LoaiDichVu, TenDichVu, MaDichVu, NgayThucHien, NgayHoanThanh, DoanhThuTruocChietKhau, Vi, YeuCauHoaDon, GhiChu, NguoiPhuTrachId, ThuTucCapToc } = req.body;
 
     const { data: current } = await supabase
       .from("B2B_SERVICES")
@@ -1743,60 +1768,80 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
       .eq("STT", id)
       .single();
 
+    if (!current) return res.status(404).json({ success: false, message: "Không tìm thấy dịch vụ" });
+
     const DoanhNghiepID = current.DoanhNghiepID;
 
-    // Lấy số dư hiện tại ở B2B_APPROVED
+    // 1. Xử lý ví (Cộng lại tiền cũ -> Trừ tiền mới)
     const { data: approved } = await supabase
       .from("B2B_APPROVED")
       .select("SoDuVi")
       .eq("ID", DoanhNghiepID)
       .maybeSingle();
 
-    const SoDuCu = approved?.SoDuVi ?? 0;
+    const SoDuHienTai = approved?.SoDuVi ?? 0;
     const ViCu = current.Vi ?? 0;
+    const ViMoi = Vi !== undefined ? Vi : ViCu;
 
-    const chenhLech = Vi - ViCu;
-    const SoDuMoi = SoDuCu - chenhLech;
 
-    if (SoDuMoi < 0)
-      return res.status(400).json({ success: false, message: "Số dư ví không đủ" });
+    const SoDuSauKhiHoan = SoDuHienTai + ViCu;
+    const SoDuCuoiCung = SoDuSauKhiHoan - ViMoi;
+
+    if (SoDuCuoiCung < 0) {
+      return res.status(400).json({ success: false, message: "Số dư ví không đủ để cập nhật dịch vụ này" });
+    }
 
     await supabase
       .from("B2B_APPROVED")
-      .update({ SoDuVi: SoDuMoi })
+      .update({ SoDuVi: SoDuCuoiCung })
       .eq("ID", DoanhNghiepID);
 
-    // Tính chiết khấu mới
+    // 2. Tính chiết khấu
     const { data: ds } = await supabase
       .from("B2B_SERVICES")
       .select("DoanhThuSauChietKhau")
       .eq("DoanhNghiepID", DoanhNghiepID)
-      .neq("STT", id);
+      .neq("STT", id); 
 
-    const totalOld = ds?.reduce((sum, i) => sum + (i.DoanhThuSauChietKhau || 0), 0) ?? 0;
-    const { hang, chietKhau } = tinhHangVaChietKhau(totalOld);
+    const totalOther = ds?.reduce((sum, i) => sum + (i.DoanhThuSauChietKhau || 0), 0) ?? 0;
+    const { hang, chietKhau } = tinhHangVaChietKhau(totalOther);
 
-    const SoTienChietKhau = Math.round((DoanhThuTruocChietKhau * chietKhau) / 100);
-    const DoanhThuSauChietKhau = DoanhThuTruocChietKhau - SoTienChietKhau;
-    let finalMaDichVu = MaDichVu;
-    if (!finalMaDichVu && (Vi > 0 || DoanhThuTruocChietKhau > 0)) {
-        // Cần lấy thông tin YeuCauHoaDon từ bản ghi hiện tại hoặc req.body nếu có update
-        const YeuCauHoaDon = current.YeuCauHoaDon || "No"; 
-        finalMaDichVu = await generateServiceCode(supabase, LoaiDichVu, YeuCauHoaDon);
+    const DoanhThuMoi = DoanhThuTruocChietKhau !== undefined ? DoanhThuTruocChietKhau : current.DoanhThuTruocChietKhau;
+    const SoTienChietKhau = Math.round((DoanhThuMoi * chietKhau) / 100);
+    const DoanhThuSauChietKhau = DoanhThuMoi - SoTienChietKhau;
+
+  
+    let finalMaDichVu = MaDichVu || current.ServiceID; 
+    
+
+    if (!finalMaDichVu || finalMaDichVu.trim() === "") {
+        const invoiceStatus = YeuCauHoaDon || current.YeuCauHoaDon || "No";
+        const serviceType = LoaiDichVu || current.LoaiDichVu;
+        
+        // Gọi hàm sinh mã
+        finalMaDichVu = await generateServiceCode(supabase, serviceType, invoiceStatus);
+        console.log("System generated code (Update/Approve):", finalMaDichVu);
     }
+
+    // 4. Update
     const { data, error } = await supabase
       .from("B2B_SERVICES")
       .update({
-        LoaiDichVu,
-        TenDichVu,
-        ServiceID: finalMaDichVu,
-        NgayThucHien,
-        NgayHoanThanh,
-        Vi,
-        DoanhThuTruocChietKhau,
+        LoaiDichVu: LoaiDichVu || current.LoaiDichVu,
+        TenDichVu: TenDichVu || current.TenDichVu,
+        ServiceID: finalMaDichVu, 
+        NgayThucHien: NgayThucHien || current.NgayThucHien,
+        NgayHoanThanh: NgayHoanThanh || current.NgayHoanThanh,
+        Vi: ViMoi,
+        DoanhThuTruocChietKhau: DoanhThuMoi,
         MucChietKhau: chietKhau,
         SoTienChietKhau,
         DoanhThuSauChietKhau,
+        YeuCauHoaDon: YeuCauHoaDon || current.YeuCauHoaDon,
+        GhiChu: GhiChu || current.GhiChu,
+        NguoiPhuTrachId: NguoiPhuTrachId || current.NguoiPhuTrachId,
+        GoiDichVu: (ThuTucCapToc === "Yes" || ThuTucCapToc === "Có") ? "Cấp tốc" : "Thông thường",
+        TongDoanhThuTichLuy: totalOther + DoanhThuSauChietKhau, 
         UpdatedAt: new Date().toISOString()
       })
       .eq("STT", id)
@@ -1805,7 +1850,7 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
 
     if (error) throw error;
 
-    res.json({ success: true, data, SoDuCu, SoDuMoi, ViCu, ViMoi: Vi });
+    res.json({ success: true, data, message: "Duyệt/Cập nhật thành công", newCode: finalMaDichVu });
   } catch (err) {
     console.error("❌ Lỗi update B2B_SERVICES:", err);
     res.status(500).json({ success: false, message: err.message });
