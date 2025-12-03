@@ -7,14 +7,116 @@ import bcrypt from "bcryptjs";
 import http from "http";
 import { Server } from "socket.io";
 import dotenv from "dotenv";
-import { PDFDocument, rgb } from "pdf-lib";
 import fetch from "node-fetch";
 import nodemailer from "nodemailer";
 import emailjs from '@emailjs/nodejs';
 import crypto from "crypto";
 dotenv.config();
+function getInitials(str) {
+  if (!str) return "";
+  return str
+    .normalize('NFD') // Tách dấu ra khỏi ký tự
+    .replace(/[\u0300-\u036f]/g, '') // Xóa các dấu
+    .replace(/đ/g, 'd').replace(/Đ/g, 'D') // Xử lý chữ Đ
+    .replace(/[^a-zA-Z0-9 ]/g, "") // Chỉ giữ lại chữ và số
+    .trim()
+    .split(/\s+/) // Tách theo khoảng trắng
+    .map(word => word[0]) // Lấy ký tự đầu
+    .join('')
+    .toUpperCase();
+}
+function translateServiceName(name) {
+    const map = {
+      "인증 센터": "Chứng thực",
+      "결혼 이민": "Kết hôn",
+      "출생신고 대행": "Khai sinh, khai tử",
+      "출입국 행정 대행": "Xuất nhập cảnh",
+      "신분증명 서류 대행": "Giấy tờ tuỳ thân",
+      "입양 절차 대행": "Nhận nuôi",
+      "비자 대행": "Thị thực",
+      "법률 컨설팅": "Tư vấn pháp lý",
+      "B2B 서비스": "Dịch vụ B2B",
+      "기타": "Khác",
+    };
+  // Nếu tìm thấy trong map thì trả về tiếng Việt, không thì giữ nguyên
+  return map[name?.trim()] || name?.trim() || "";
+}
+
+// [MỚI] Hàm dịch tên cơ sở/chi nhánh
+function translateBranchName(name) {
+    const map = {
+        "서울": "Seoul",
+        "부산": "Busan"
+    };
+    return map[name?.trim()] || name?.trim() || "";
+}
 async function generateServiceCode(supabase, loaiDichVu, yeuCauHoaDon) {
-  // Map mã dịch vụ theo yêu cầu (9 loại + tách Khai tử)
+  // Map mã dịch vụ theo yêu cầu
+  const typeMap = {
+    "Chứng thực": "CT",
+    "Kết hôn": "KH",
+    "Khai sinh": "KS",
+    "Khai tử": "KT",
+    "Xuất nhập cảnh": "XNC",
+    "Giấy tờ tuỳ thân": "GT",
+    "Nhận nuôi": "NN",
+    "Thị thực": "TT",
+    "Tư vấn pháp lý": "TV",
+    "Dịch vụ B2B": "B2B",
+   
+  };
+  
+  let prefix = "";
+  const cleanLoaiDichVu = loaiDichVu ? loaiDichVu.trim() : "";
+  
+
+  for (const [key, value] of Object.entries(typeMap)) {
+    if (cleanLoaiDichVu.toLowerCase().includes(key.toLowerCase())) {
+      prefix = value;
+      break;
+    }
+  }
+
+
+  if (!prefix) {
+    prefix = getInitials(cleanLoaiDichVu);
+  }
+
+
+  if (!prefix) prefix = "OT";
+
+
+  const now = new Date();
+  const yy = now.getFullYear().toString().slice(-2);
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const dateStr = `${yy}${mm}${dd}`; 
+
+  const isInvoice = ["yes", "có", "true"].includes(String(yeuCauHoaDon).toLowerCase());
+  const invoiceCode = isInvoice ? "Y" : "N";
+
+  const searchString = `${prefix}-${dateStr}-%`; 
+
+  const { data: lastRecord } = await supabase
+    .from("B2B_SERVICES")
+    .select("ServiceID")
+    .like("ServiceID", searchString)
+    .order("ServiceID", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  let nextSequence = 1;
+  if (lastRecord && lastRecord.ServiceID) {
+    const parts = lastRecord.ServiceID.split('-');
+    const lastNum = parseInt(parts[parts.length - 1]);
+    if (!isNaN(lastNum)) nextSequence = lastNum + 1;
+  }
+
+  const sequenceStr = String(nextSequence).padStart(3, "0");
+  return `${prefix}-${dateStr}-${invoiceCode}-${sequenceStr}`;
+}
+async function generateB2CServiceCode(supabase, loaiDichVu, yeuCauHoaDon) {
+  // 1. Map ký tự viết tắt
   const typeMap = {
     "Chứng thực": "CT",
     "Kết hôn": "KH",
@@ -26,60 +128,120 @@ async function generateServiceCode(supabase, loaiDichVu, yeuCauHoaDon) {
     "Thị thực": "TT",
     "Tư vấn pháp lý": "TV",
     "Dịch vụ B2B": "B2B",
-    "Khác": "OT"
+    // Bỏ "Khác"
   };
+
+  // Chuẩn hóa tên dịch vụ
+  let cleanName = loaiDichVu ? loaiDichVu.trim() : "";
   
-  let prefix = "OT";
-  const cleanLoaiDichVu = loaiDichVu ? loaiDichVu.trim() : "";
-  
-  // Logic tìm prefix: So khớp chính xác hoặc chứa từ khóa
+  const krToViMap = {
+      "인증 센터": "Chứng thực", "결혼 이민": "Kết hôn",
+      "출생신고 대행": "Khai sinh, khai tử", "출입국 행정 대행": "Xuất nhập cảnh",
+      "신분증명 서류 대행": "Giấy tờ tuỳ thân", "입양 절차 대행": "Nhận nuôi",
+      "비자 대행": "Thị thực", "법률 컨설팅": "Tư vấn pháp lý",
+      "B2B 서비스": "Dịch vụ B2B", "기타": "Khác",
+  };
+  if (krToViMap[cleanName]) cleanName = krToViMap[cleanName];
+
+  // Tìm prefix
+  let prefix = ""; 
   for (const [key, value] of Object.entries(typeMap)) {
-    // Nếu loại dịch vụ chứa từ khóa (ví dụ: "Khai tử trọn gói" -> chứa "Khai tử")
-    if (cleanLoaiDichVu.toLowerCase().includes(key.toLowerCase())) {
+    if (cleanName.toLowerCase().includes(key.toLowerCase())) {
       prefix = value;
       break;
     }
   }
 
+  // [LOGIC MỚI] Nếu không thuộc danh sách trên -> Lấy chữ cái đầu
+  if (!prefix) {
+     prefix = getInitials(cleanName);
+  }
 
+  // Fallback cuối cùng
+  if (!prefix) prefix = "OT";
+
+  // 2. Ngày tháng (YYMMDD)
   const now = new Date();
   const yy = now.getFullYear().toString().slice(-2);
   const mm = String(now.getMonth() + 1).padStart(2, '0');
   const dd = String(now.getDate()).padStart(2, '0');
-  const dateStr = `${yy}${mm}${dd}`; 
+  const dateStr = `${yy}${mm}${dd}`;
 
-  // 3. Mã hóa đơn (Y/N)
-  // Check các trường hợp: "Yes", "Có", "true"
-  const isInvoice = ["yes", "có", "true"].includes(String(yeuCauHoaDon).toLowerCase());
+  // 3. Invoice (Y/N)
+  const isInvoice = ["yes", "có", "true", "y"].includes(String(yeuCauHoaDon).toLowerCase());
   const invoiceCode = isInvoice ? "Y" : "N";
 
+  // 4. Tìm số thứ tự
+  const searchString = `${prefix}-${dateStr}-%`;
 
-  const searchString = `${prefix}-${dateStr}-%`; 
-
-  const { data: lastRecord, error } = await supabase
-    .from("B2B_SERVICES")
-    .select("ServiceID")
-    .like("ServiceID", searchString)
-    .order("ServiceID", { ascending: false }) // Lấy cái mới nhất
+  const { data: lastRecord } = await supabase
+    .from("YeuCau")
+    .select("MaHoSo")
+    .like("MaHoSo", searchString)
+    .order("MaHoSo", { ascending: false })
     .limit(1)
     .maybeSingle();
 
   let nextSequence = 1;
-
-  if (lastRecord && lastRecord.ServiceID) {
-    // Tách chuỗi: HC-251130-Y-002 -> Lấy 002
-    const parts = lastRecord.ServiceID.split('-');
+  if (lastRecord && lastRecord.MaHoSo) {
+    const parts = lastRecord.MaHoSo.split('-');
     const lastNum = parseInt(parts[parts.length - 1]);
-    if (!isNaN(lastNum)) {
-      nextSequence = lastNum + 1;
-    }
+    if (!isNaN(lastNum)) nextSequence = lastNum + 1;
   }
 
-  const sequenceStr = String(nextSequence).padStart(3, "0"); // 1 -> 001
+  const sequenceStr = String(nextSequence).padStart(3, "0");
 
-  
   return `${prefix}-${dateStr}-${invoiceCode}-${sequenceStr}`;
 }
+
+app.put("/api/yeucau/approve/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId } = req.body; // ID người thực hiện duyệt
+
+    // 1. Kiểm tra quyền hạn (Backend check)
+    const { data: user } = await supabase.from("User").select("is_accountant, is_director").eq("id", userId).single();
+    if (!user || (!user.is_accountant && !user.is_director)) {
+      return res.status(403).json({ success: false, message: "Bạn không có quyền duyệt dịch vụ này." });
+    }
+
+    // 2. Lấy thông tin yêu cầu hiện tại
+    const { data: currentReq, error: fetchError } = await supabase
+      .from("YeuCau")
+      .select("*")
+      .eq("YeuCauID", id)
+      .single();
+
+    if (fetchError || !currentReq) return res.status(404).json({ success: false, message: "Không tìm thấy yêu cầu" });
+
+    // Nếu đã có mã chuẩn rồi thì không sinh lại (tránh trùng lặp)
+    if (currentReq.MaHoSo && currentReq.MaHoSo.includes("-") && currentReq.MaHoSo.length > 10) {
+        return res.status(400).json({ success: false, message: "Yêu cầu này đã được cấp mã rồi." });
+    }
+
+    // 3. Sinh mã dịch vụ
+    const newServiceCode = await generateB2CServiceCode(supabase, currentReq.TenDichVu, currentReq.Invoice);
+
+    // 4. Cập nhật DB: Gán mã, chuyển trạng thái -> Đang xử lý
+    const { data: updatedData, error: updateError } = await supabase
+      .from("YeuCau")
+      .update({
+        MaHoSo: newServiceCode, // Lưu mã sinh được vào cột MaHoSo
+        TrangThai: "Đang xử lý", // Chuyển trạng thái
+      })
+      .eq("YeuCauID", id)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    res.json({ success: true, message: `Đã duyệt thành công. Mã dịch vụ: ${newServiceCode}`, data: updatedData });
+
+  } catch (err) {
+    console.error("❌ Approve Error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 function translateServiceName(name) {
     const map = {
       "인증 센터": "Chứng thực",
@@ -2194,40 +2356,6 @@ app.post("/api/b2b/login", async (req, res) => {
   }
 });
 
-app.get("/api/pdf-signature/:mahoso", async (req, res) => {
-  try {
-    const { mahoso } = req.params;
-
-    // Lấy PDF chưa ký
-    const { data: pdfData, error: pdfError } = await supabase
-      .from("PdfChuaKy")
-      .select("MaHoSo, PdfUrl, NgayTao")
-      .eq("MaHoSo", mahoso)
-      .maybeSingle();
-    if (pdfError) throw pdfError;
-
-    // Lấy danh sách vùng ký
-    const { data: areasData, error: areaError } = await supabase
-      .from("signatureareas")
-      .select("*")
-      .eq("MaHoSo", mahoso);
-    if (areaError) throw areaError;
-
-    if (!pdfData) {
-      return res.status(404).json({ success: false, message: "Không tìm thấy PDF cho hồ sơ này" });
-    }
-
-    res.json({
-      success: true,
-      mahoso,
-      pdf: pdfData,
-      signatureAreas: areasData || [],
-    });
-  } catch (err) {
-    console.error("❌ Lỗi khi JOIN PDF và vùng ký:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
 
 
 
@@ -2271,280 +2399,15 @@ app.delete("/api/yeucau/:id", async (req, res) => {
 });
 
 
-app.post("/api/upload-pdf", upload.single("pdf"), async (req, res) => {
-  try {
-    const { MaHoSo } = req.body;
-    if (!req.file || !MaHoSo)
-      return res.status(400).json({ success: false, message: "Thiếu file hoặc MaHoSo" });
-
-    // 1️⃣ Upload PDF gốc lên bucket 'pdfs_chuaky'
-    const fileExt = req.file.originalname.split(".").pop();
-    const fileName = `chuaky_${MaHoSo}_${Date.now()}.${fileExt}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("pdfs_chuaky")
-      .upload(fileName, req.file.buffer, {
-        contentType: "application/pdf",
-        upsert: true,
-      });
-    if (uploadError) throw uploadError;
-
-    const { data: publicUrlData } = supabase.storage
-      .from("pdfs_chuaky")
-      .getPublicUrl(fileName);
-    const pdfUrl = publicUrlData.publicUrl;
-
-    // 2️⃣ Lưu PDF gốc vào bảng PdfChuaKy
-    await supabase
-      .from("PdfChuaKy")
-      .upsert(
-        { MaHoSo, PdfUrl: pdfUrl, NgayTao: new Date().toISOString() },
-        { onConflict: "MaHoSo" }
-      );
-
-    // 3️⃣ Tạo vùng ký mặc định (nếu chưa có)
-    await supabase
-      .from("signatureareas")
-      .upsert({
-        MaHoSo,
-        pageIndex: 1,
-        x: 195,
-        y: 510,
-        width: 90,
-        height: 25,
-        NgayTao: new Date().toISOString(),
-      });
-
-    // 4️⃣ Tạo link ký cho khách hàng
-    const signLink = `https://onepasscms.vercel.app/kyhoso/${MaHoSo}`;
-
-    res.json({
-      success: true,
-      message: "Upload PDF thành công, đã tạo vùng ký.",
-      pdfUrl,
-      signLink,
-    });
-  } catch (err) {
-    console.error("❌ Lỗi upload PDF:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-
-// ================== KHÁCH HÀNG KÝ PDF ==================
-app.post("/api/sign-pdf", async (req, res) => {
-  try {
-    const { MaHoSo, signatureData } = req.body;
-    if (!MaHoSo || !signatureData)
-      return res.status(400).json({ success: false, message: "Thiếu MaHoSo hoặc chữ ký" });
-
-    // 1️⃣ Lấy PDF gốc từ PdfChuaKy
-    const { data: pdfData, error: pdfError } = await supabase
-      .from("PdfChuaKy")
-      .select("PdfUrl")
-      .eq("MaHoSo", MaHoSo)
-      .maybeSingle();
-    if (pdfError || !pdfData) throw new Error("Không tìm thấy PDF gốc");
-
-    // 2️⃣ Lấy vùng ký
-    const { data: area } = await supabase
-      .from("signatureareas")
-      .select("*")
-      .eq("MaHoSo", MaHoSo)
-      .maybeSingle();
-    if (!area) throw new Error("Không tìm thấy vùng ký!");
-
-    // 3️⃣ Tải PDF và chèn chữ ký
-    const pdfBytes = await fetch(pdfData.PdfUrl).then((r) => r.arrayBuffer());
-    const pdfDoc = await PDFDocument.load(pdfBytes);
-    const page = pdfDoc.getPages()[area.pageIndex - 1];
-
-    const imageBytes = Buffer.from(signatureData.split(",")[1], "base64");
-    const pngImage = await pdfDoc.embedPng(imageBytes);
-    page.drawImage(pngImage, {
-      x: Number(area.x),
-      y: Number(area.y),
-      width: Number(area.width),
-      height: Number(area.height),
-    });
-
-    // 4️⃣ Lưu vào bucket 'pdfs_daky'
-    const signedBytes = await pdfDoc.save();
-    const fileName = `daky_${MaHoSo}_${Date.now()}.pdf`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("pdfs_daky")
-      .upload(fileName, Buffer.from(signedBytes), {
-        contentType: "application/pdf",
-        upsert: true,
-      });
-    if (uploadError) throw uploadError;
-
-    const { data: publicUrlData } = supabase.storage
-      .from("pdfs_daky")
-      .getPublicUrl(fileName);
-
-    res.json({
-      success: true,
-      message: "Đã ký PDF và lưu vào pdfs_daky",
-      signedUrl: publicUrlData.publicUrl,
-    });
-  } catch (err) {
-    console.error("❌ Lỗi ký PDF:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
 
 
 
 
-// UPDATE User với avatar
-app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const { name, username, email, password } = req.body;
-
-    console.log("Updating user:", { 
-      id,
-      name,
-      username, 
-      email, 
-      hasPassword: !!password, 
-      hasFile: !!req.file,
-      bodyKeys: Object.keys(req.body)
-    });
-
-    const updateData = { 
-      name,
-      username, 
-      email,
-      updated_at: new Date().toISOString()
-    };
-
-    if (password && password.trim() !== "") {
-      updateData.password_hash = await bcrypt.hash(password, 10);
-      console.log("Password updated");
-    }
-
-    if (req.file) {
-      console.log("Processing avatar file:", {
-        originalname: req.file.originalname,
-        mimetype: req.file.mimetype,
-        size: req.file.size
-      });
-
-      const fileExt = req.file.originalname.split(".").pop() || 'jpg';
-      const fileName = `avatar_${id}_${Date.now()}.${fileExt}`;
-
-      console.log("Uploading avatar to Supabase storage:", fileName);
-
-      const { error: uploadError } = await supabase.storage
-        .from("avatars")
-        .upload(fileName, req.file.buffer, { 
-          contentType: req.file.mimetype,
-          upsert: true 
-        });
-
-      if (uploadError) {
-        console.error("Supabase storage upload error:", uploadError);
-        throw uploadError;
-      }
-
-      const { data: publicUrlData } = supabase.storage
-        .from("avatars")
-        .getPublicUrl(fileName);
-
-      updateData.avatar = publicUrlData.publicUrl;
-      console.log("Avatar uploaded successfully. URL:", publicUrlData.publicUrl);
-    }
-
-    console.log("Final update data:", updateData);
-
-    const { data, error } = await supabase
-      .from("User")
-      .update(updateData)
-      .eq("id", id)
-      .select("id, username, email, avatar, is_admin, is_accountant, is_director, name");
-
-    if (error) {
-      console.error("Supabase database update error:", error);
-      throw error;
-    }
-
-    console.log("User update successful:", data);
-    res.json({ 
-      success: true, 
-      data,
-      message: "Cập nhật thông tin thành công" 
-    });
-
-  } catch (err) {
-    console.error("Error updating user:", err);
-    res.status(500).json({ 
-      success: false, 
-      error: err.message,
-      message: "Lỗi máy chủ khi cập nhật người dùng" 
-    });
-  }
-});
-// ======================== PDF CHƯA KÝ =========================
-
-// ✅ Lưu hoặc cập nhật link PDF chưa ký
-app.post("/api/pdf-chuaky", async (req, res) => {
-  try {
-    const { MaHoSo, PdfUrl } = req.body;
-    if (!MaHoSo || !PdfUrl)
-      return res.status(400).json({ success: false, message: "Thiếu MaHoSo hoặc PdfUrl" });
-
-    const { data, error } = await supabase
-      .from("PdfChuaKy")
-      .upsert(
-        { MaHoSo, PdfUrl, NgayTao: new Date().toISOString() },
-        { onConflict: "MaHoSo" }
-      )
-      .select();
-    if (error) throw error;
-    res.json({ success: true, data });
-  } catch (err) {
-    console.error("❌ Lỗi lưu PDF:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-app.get("/api/pdf-chuaky/:mahoso", async (req, res) => {
-  try {
-    const { mahoso } = req.params;
-    const { data, error } = await supabase
-      .from("PdfChuaKy")
-      .select("*")
-      .eq("MaHoSo", mahoso)
-      .maybeSingle();
-    if (error) throw error;
-    res.json({ success: true, data });
-  } catch (err) {
-    console.error("❌ Lỗi lấy PDF:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
 
 
-// ✅ Lấy link PDF chưa ký theo mã hồ sơ
-app.get("/api/signature-area/:mahoso", async (req, res) => {
-  try {
-    const { mahoso } = req.params;
-    const { data, error } = await supabase
-      .from("signatureareas")
-      .select("*")
-      .eq("MaHoSo", mahoso)
-      .order("id");
-    if (error) throw error;
-    res.json({ success: true, data });
-  } catch (err) {
-    console.error("❌ Lỗi lấy vùng ký:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});// ✅ API: Lấy danh sách vùng ký cho 1 hồ sơ (ví dụ: 2 vùng ký)
+
+
+
 
 
 app.put("/api/yeucau/:id", async (req, res) => {
