@@ -1895,19 +1895,21 @@ app.post("/api/b2b/services", async (req, res) => {
     if (error) throw error;
 
     if (global.io) {
-      const notificationPayload = {
-        YeuCauID: data.STT, // ID bản ghi vừa tạo
-        HoTen: approved?.TenDoanhNghiep || "Doanh nghiệp B2B", 
-        TenDichVu: `Đăng ký B2B mới: ${LoaiDichVu}`,
-        LoaiThongBao: "B2B_NEW_SERVICE",
-        NgayTao: new Date().toISOString(),
-        
+  const payload = {
+    serviceId: data.STT,
+    doanhNghiep: approved?.TenDoanhNghiep || "Doanh nghiệp B2B",
+    loaiDichVu: LoaiDichVu,
+    tenDichVu: TenDichVu || "",
+    createdAt: new Date().toISOString(),
+  };
 
-        TargetRoles: ["accountant", "director"] 
-      };
-      
-      global.io.emit("new_request", notificationPayload);
-    }
+  // Gửi cho kế toán
+  global.io.to("accountant").emit("b2b_new_service", payload);
+
+  // Gửi cho giám đốc
+  global.io.to("director").emit("b2b_new_service", payload);
+}
+
 
 
     res.json({ success: true, data, SoDuCu, SoDuMoi, ViDaTru: Vi });
@@ -2010,6 +2012,23 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
       .single();
 
     if (error) throw error;
+    // Nếu duyệt thành công, gửi socket cho người phụ trách
+    if (global.io) {
+      const targetUser = data.NguoiPhuTrachId;
+      
+      if (targetUser) {
+        const payload = {
+          serviceId: data.STT,
+          tenDichVu: data.TenDichVu,
+          loaiDichVu: data.LoaiDichVu,
+          doanhNghiepId: data.DoanhNghiepID,
+          updatedAt: new Date().toISOString(),
+          message: "Dịch vụ bạn phụ trách đã được duyệt."
+        };
+
+        global.io.to(`user_${targetUser}`).emit("b2b_service_approved", payload);
+      }
+    }
 
     res.json({ success: true, data, message: "Duyệt/Cập nhật thành công", newCode: finalMaDichVu });
   } catch (err) {
