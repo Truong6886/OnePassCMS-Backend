@@ -2522,6 +2522,7 @@ app.post("/api/tuvan", async (req, res) => {
       MaVung,
       SoDienThoai,
       TieuDe,
+      LoaiDichVu,
       NoiDung,
       ChonNgay,
       Gio
