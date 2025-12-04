@@ -1801,7 +1801,7 @@ app.get("/api/b2b/services/wallet", async (req, res) => {
   }
 });
 
-// Thêm dịch vụ mới
+// Thêm dịch vụ mới (Create)
 app.post("/api/b2b/services", async (req, res) => {
   try {
     const { 
@@ -1820,11 +1820,11 @@ app.post("/api/b2b/services", async (req, res) => {
       NguoiPhuTrachId 
     } = req.body;
 
-    if (!DoanhNghiepID || !LoaiDichVu || Vi == null) {
+    if (!DoanhNghiepID || !LoaiDichVu) {
       return res.status(400).json({ success: false, message: "Thiếu dữ liệu bắt buộc" });
     }
 
-   
+    // 1. Xử lý ví (Giữ nguyên logic cũ)
     const { data: approved } = await supabase
       .from("B2B_APPROVED")
       .select("SoDuVi, TenDoanhNghiep") 
@@ -1832,17 +1832,18 @@ app.post("/api/b2b/services", async (req, res) => {
       .maybeSingle();
 
     const SoDuCu = approved?.SoDuVi ?? 0;
-    const SoDuMoi = SoDuCu - Vi;
+    // Nếu là nhân viên tạo (không có quyền nhập Vi), Vi có thể là null/0 -> không trừ tiền ngay
+    const ViToDeduct = Vi || 0; 
+    const SoDuMoi = SoDuCu - ViToDeduct;
 
     if (SoDuMoi < 0)
       return res.status(400).json({ success: false, message: "Số dư ví không đủ" });
 
-    await supabase
-      .from("B2B_APPROVED")
-      .update({ SoDuVi: SoDuMoi })
-      .eq("ID", DoanhNghiepID);
+    if (ViToDeduct > 0) {
+        await supabase.from("B2B_APPROVED").update({ SoDuVi: SoDuMoi }).eq("ID", DoanhNghiepID);
+    }
 
-    // 2. Tính chiết khấu (Giữ nguyên)
+    // 2. Tính chiết khấu
     const { data: ds } = await supabase
       .from("B2B_SERVICES")
       .select("DoanhThuSauChietKhau")
@@ -1851,20 +1852,19 @@ app.post("/api/b2b/services", async (req, res) => {
     const totalCurrent = ds?.reduce((sum, i) => sum + (i.DoanhThuSauChietKhau || 0), 0) ?? 0;
     const { hang, chietKhau } = tinhHangVaChietKhau(totalCurrent);
     
-    const SoTienChietKhau = Math.round((DoanhThuTruocChietKhau * chietKhau) / 100);
-    const DoanhThuSauChietKhau = DoanhThuTruocChietKhau - SoTienChietKhau;
+    // Nếu nhân viên tạo chưa nhập doanh thu thì để 0
+    const DoanhThuInput = DoanhThuTruocChietKhau || 0;
+    const SoTienChietKhau = Math.round((DoanhThuInput * chietKhau) / 100);
+    const DoanhThuSauChietKhau = DoanhThuInput - SoTienChietKhau;
 
-    // 3. Xử lý Gói Dịch Vụ
     let finalGoiDichVu = "Thông thường";
     if (ThuTucCapToc === "Yes" || ThuTucCapToc === "true" || ThuTucCapToc === true || ThuTucCapToc === "Có") {
         finalGoiDichVu = "Cấp tốc";
     }
 
-    // 4. Sinh mã dịch vụ
-    let finalMaDichVu = MaDichVu;
-    if (!finalMaDichVu) {
-       finalMaDichVu = await generateServiceCode(supabase, LoaiDichVu, YeuCauHoaDon);
-    }
+    // [THAY ĐỔI QUAN TRỌNG]: Khi tạo mới KHÔNG sinh mã tự động nữa
+    // Chỉ lưu nháp, ServiceID để null hoặc empty
+    let finalMaDichVu = MaDichVu || null; 
 
     // 5. Insert vào Supabase
     const { data, error } = await supabase
@@ -1873,7 +1873,7 @@ app.post("/api/b2b/services", async (req, res) => {
         DoanhNghiepID,
         LoaiDichVu,
         TenDichVu: TenDichVu || "",
-        ServiceID: finalMaDichVu, 
+        ServiceID: finalMaDichVu, // Sẽ là null nếu tạo mới
         GoiDichVu: finalGoiDichVu, 
         YeuCauHoaDon: YeuCauHoaDon || "No",
         InvoiceUrl: InvoiceUrl || null,
@@ -1881,11 +1881,11 @@ app.post("/api/b2b/services", async (req, res) => {
         NguoiPhuTrachId: NguoiPhuTrachId || null, 
         NgayThucHien,
         NgayHoanThanh: NgayHoanThanh || null, 
-        DoanhThuTruocChietKhau,
+        DoanhThuTruocChietKhau: DoanhThuInput,
         MucChietKhau: chietKhau,
         SoTienChietKhau,
         DoanhThuSauChietKhau,
-        Vi,
+        Vi: ViToDeduct,
         TongDoanhThuTichLuy: totalCurrent + DoanhThuSauChietKhau, 
         CreatedAt: new Date().toISOString()
       }])
@@ -1895,35 +1895,34 @@ app.post("/api/b2b/services", async (req, res) => {
     if (error) throw error;
 
     if (global.io) {
-  const payload = {
-    serviceId: data.STT,
-    doanhNghiep: approved?.TenDoanhNghiep || "Doanh nghiệp B2B",
-    loaiDichVu: LoaiDichVu,
-    tenDichVu: TenDichVu || "",
-    createdAt: new Date().toISOString(),
-  };
+      const payload = {
+        serviceId: data.STT,
+        doanhNghiep: approved?.TenDoanhNghiep || "Doanh nghiệp B2B",
+        loaiDichVu: LoaiDichVu,
+        message: "Có dịch vụ B2B mới chờ duyệt"
+      };
+      // Báo cho kế toán/giám đốc duyệt
+      global.io.to("accountant").emit("b2b_new_service", payload);
+      global.io.to("director").emit("b2b_new_service", payload);
+    }
 
-  // Gửi cho kế toán
-  global.io.to("accountant").emit("b2b_new_service", payload);
-
-  // Gửi cho giám đốc
-  global.io.to("director").emit("b2b_new_service", payload);
-}
-
-
-
-    res.json({ success: true, data, SoDuCu, SoDuMoi, ViDaTru: Vi });
+    res.json({ success: true, data, SoDuCu, SoDuMoi, ViDaTru: ViToDeduct });
   } catch (err) {
     console.error("❌ Lỗi thêm service:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
+// Cập nhật hoặc Duyệt dịch vụ (Update/Approve)
 app.put("/api/b2b/services/update/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    // Nhận thêm YeuCauHoaDon từ body để sinh mã chính xác
-    const { LoaiDichVu, TenDichVu, MaDichVu, NgayThucHien, NgayHoanThanh, DoanhThuTruocChietKhau, Vi, YeuCauHoaDon, GhiChu, NguoiPhuTrachId, ThuTucCapToc } = req.body;
+    const { 
+        LoaiDichVu, TenDichVu, MaDichVu, NgayThucHien, NgayHoanThanh, 
+        DoanhThuTruocChietKhau, Vi, YeuCauHoaDon, GhiChu, NguoiPhuTrachId, 
+        ThuTucCapToc, 
+        generateCode // [MỚI] Flag nhận từ client để biết có sinh mã hay không
+    } = req.body;
 
     const { data: current } = await supabase
       .from("B2B_SERVICES")
@@ -1935,7 +1934,7 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
 
     const DoanhNghiepID = current.DoanhNghiepID;
 
-    // 1. Xử lý ví (Cộng lại tiền cũ -> Trừ tiền mới)
+    // 1. Xử lý ví
     const { data: approved } = await supabase
       .from("B2B_APPROVED")
       .select("SoDuVi")
@@ -1946,7 +1945,6 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
     const ViCu = current.Vi ?? 0;
     const ViMoi = Vi !== undefined ? Vi : ViCu;
 
-
     const SoDuSauKhiHoan = SoDuHienTai + ViCu;
     const SoDuCuoiCung = SoDuSauKhiHoan - ViMoi;
 
@@ -1954,10 +1952,9 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
       return res.status(400).json({ success: false, message: "Số dư ví không đủ để cập nhật dịch vụ này" });
     }
 
-    await supabase
-      .from("B2B_APPROVED")
-      .update({ SoDuVi: SoDuCuoiCung })
-      .eq("ID", DoanhNghiepID);
+    if (ViMoi !== ViCu) {
+        await supabase.from("B2B_APPROVED").update({ SoDuVi: SoDuCuoiCung }).eq("ID", DoanhNghiepID);
+    }
 
     // 2. Tính chiết khấu
     const { data: ds } = await supabase
@@ -1973,17 +1970,17 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
     const SoTienChietKhau = Math.round((DoanhThuMoi * chietKhau) / 100);
     const DoanhThuSauChietKhau = DoanhThuMoi - SoTienChietKhau;
 
-  
+    // [LOGIC SINH MÃ MỚI]
     let finalMaDichVu = MaDichVu || current.ServiceID; 
     
 
-    if (!finalMaDichVu || finalMaDichVu.trim() === "") {
+    if ((!finalMaDichVu || finalMaDichVu.trim() === "") && generateCode === true) {
         const invoiceStatus = YeuCauHoaDon || current.YeuCauHoaDon || "No";
         const serviceType = LoaiDichVu || current.LoaiDichVu;
         
         // Gọi hàm sinh mã
         finalMaDichVu = await generateServiceCode(supabase, serviceType, invoiceStatus);
-        console.log("System generated code (Update/Approve):", finalMaDichVu);
+        console.log("System generated code (Approval):", finalMaDichVu);
     }
 
     // 4. Update
@@ -2012,25 +2009,19 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
       .single();
 
     if (error) throw error;
-    // Nếu duyệt thành công, gửi socket cho người phụ trách
-    if (global.io) {
-      const targetUser = data.NguoiPhuTrachId;
-      
-      if (targetUser) {
-        const payload = {
-          serviceId: data.STT,
-          tenDichVu: data.TenDichVu,
-          loaiDichVu: data.LoaiDichVu,
-          doanhNghiepId: data.DoanhNghiepID,
-          updatedAt: new Date().toISOString(),
-          message: "Dịch vụ bạn phụ trách đã được duyệt."
-        };
-
-        global.io.to(`user_${targetUser}`).emit("b2b_service_approved", payload);
-      }
+    
+    if (global.io && finalMaDichVu && !current.ServiceID) {
+        // Nếu vừa mới được cấp mã (Duyệt xong)
+        const targetUser = data.NguoiPhuTrachId;
+        if (targetUser) {
+            global.io.to(`user_${targetUser}`).emit("b2b_service_approved", {
+               message: "Dịch vụ đã được duyệt",
+               code: finalMaDichVu
+            });
+        }
     }
 
-    res.json({ success: true, data, message: "Duyệt/Cập nhật thành công", newCode: finalMaDichVu });
+    res.json({ success: true, data, message: "Cập nhật thành công", newCode: finalMaDichVu });
   } catch (err) {
     console.error("❌ Lỗi update B2B_SERVICES:", err);
     res.status(500).json({ success: false, message: err.message });
