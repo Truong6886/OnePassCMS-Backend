@@ -1808,7 +1808,7 @@ app.post("/api/b2b/services", async (req, res) => {
       DoanhNghiepID, 
       LoaiDichVu, 
       TenDichVu, 
-      MaDichVu, // Frontend có thể gửi rỗng
+      MaDichVu, 
       NgayThucHien,
       NgayHoanThanh, 
       DoanhThuTruocChietKhau, 
@@ -1824,10 +1824,10 @@ app.post("/api/b2b/services", async (req, res) => {
       return res.status(400).json({ success: false, message: "Thiếu dữ liệu bắt buộc" });
     }
 
-    // 1. Xử lý trừ tiền ví (Giữ nguyên logic cũ)
+   
     const { data: approved } = await supabase
       .from("B2B_APPROVED")
-      .select("SoDuVi")
+      .select("SoDuVi, TenDoanhNghiep") 
       .eq("ID", DoanhNghiepID)
       .maybeSingle();
 
@@ -1842,7 +1842,7 @@ app.post("/api/b2b/services", async (req, res) => {
       .update({ SoDuVi: SoDuMoi })
       .eq("ID", DoanhNghiepID);
 
-    // 2. Tính chiết khấu (Giữ nguyên logic cũ)
+    // 2. Tính chiết khấu (Giữ nguyên)
     const { data: ds } = await supabase
       .from("B2B_SERVICES")
       .select("DoanhThuSauChietKhau")
@@ -1854,16 +1854,15 @@ app.post("/api/b2b/services", async (req, res) => {
     const SoTienChietKhau = Math.round((DoanhThuTruocChietKhau * chietKhau) / 100);
     const DoanhThuSauChietKhau = DoanhThuTruocChietKhau - SoTienChietKhau;
 
-    // [NEW] 3. Xử lý Gói Dịch Vụ
+    // 3. Xử lý Gói Dịch Vụ
     let finalGoiDichVu = "Thông thường";
     if (ThuTucCapToc === "Yes" || ThuTucCapToc === "true" || ThuTucCapToc === true || ThuTucCapToc === "Có") {
         finalGoiDichVu = "Cấp tốc";
     }
 
-    // [NEW] 4. TỰ ĐỘNG SINH MÃ DỊCH VỤ (Nếu chưa có)
+    // 4. Sinh mã dịch vụ
     let finalMaDichVu = MaDichVu;
     if (!finalMaDichVu) {
-       // Gọi hàm helper vừa tạo
        finalMaDichVu = await generateServiceCode(supabase, LoaiDichVu, YeuCauHoaDon);
     }
 
@@ -1882,7 +1881,6 @@ app.post("/api/b2b/services", async (req, res) => {
         NguoiPhuTrachId: NguoiPhuTrachId || null, 
         NgayThucHien,
         NgayHoanThanh: NgayHoanThanh || null, 
-        
         DoanhThuTruocChietKhau,
         MucChietKhau: chietKhau,
         SoTienChietKhau,
@@ -1895,6 +1893,22 @@ app.post("/api/b2b/services", async (req, res) => {
       .single();
 
     if (error) throw error;
+
+    if (global.io) {
+      const notificationPayload = {
+        YeuCauID: data.STT, // ID bản ghi vừa tạo
+        HoTen: approved?.TenDoanhNghiep || "Doanh nghiệp B2B", 
+        TenDichVu: `Đăng ký B2B mới: ${LoaiDichVu}`,
+        LoaiThongBao: "B2B_NEW_SERVICE",
+        NgayTao: new Date().toISOString(),
+        
+
+        TargetRoles: ["accountant", "director"] 
+      };
+      
+      global.io.emit("new_request", notificationPayload);
+    }
+
 
     res.json({ success: true, data, SoDuCu, SoDuMoi, ViDaTru: Vi });
   } catch (err) {
