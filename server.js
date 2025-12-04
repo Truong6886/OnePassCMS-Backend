@@ -1824,7 +1824,7 @@ app.post("/api/b2b/services", async (req, res) => {
       return res.status(400).json({ success: false, message: "Thiếu dữ liệu bắt buộc" });
     }
 
-    // 1. Xử lý ví (Giữ nguyên logic cũ)
+    // 1. Xử lý ví
     const { data: approved } = await supabase
       .from("B2B_APPROVED")
       .select("SoDuVi, TenDoanhNghiep") 
@@ -1832,7 +1832,6 @@ app.post("/api/b2b/services", async (req, res) => {
       .maybeSingle();
 
     const SoDuCu = approved?.SoDuVi ?? 0;
-    // Nếu là nhân viên tạo (không có quyền nhập Vi), Vi có thể là null/0 -> không trừ tiền ngay
     const ViToDeduct = Vi || 0; 
     const SoDuMoi = SoDuCu - ViToDeduct;
 
@@ -1852,7 +1851,6 @@ app.post("/api/b2b/services", async (req, res) => {
     const totalCurrent = ds?.reduce((sum, i) => sum + (i.DoanhThuSauChietKhau || 0), 0) ?? 0;
     const { hang, chietKhau } = tinhHangVaChietKhau(totalCurrent);
     
-    // Nếu nhân viên tạo chưa nhập doanh thu thì để 0
     const DoanhThuInput = DoanhThuTruocChietKhau || 0;
     const SoTienChietKhau = Math.round((DoanhThuInput * chietKhau) / 100);
     const DoanhThuSauChietKhau = DoanhThuInput - SoTienChietKhau;
@@ -1862,18 +1860,17 @@ app.post("/api/b2b/services", async (req, res) => {
         finalGoiDichVu = "Cấp tốc";
     }
 
-    // [THAY ĐỔI QUAN TRỌNG]: Khi tạo mới KHÔNG sinh mã tự động nữa
-    // Chỉ lưu nháp, ServiceID để null hoặc empty
+    // 3. Xử lý Mã dịch vụ (Create -> Null)
     let finalMaDichVu = MaDichVu || null; 
 
-    // 5. Insert vào Supabase
+    // 4. Insert vào Supabase
     const { data, error } = await supabase
       .from("B2B_SERVICES")
       .insert([{
         DoanhNghiepID,
         LoaiDichVu,
         TenDichVu: TenDichVu || "",
-        ServiceID: finalMaDichVu, // Sẽ là null nếu tạo mới
+        ServiceID: finalMaDichVu,
         GoiDichVu: finalGoiDichVu, 
         YeuCauHoaDon: YeuCauHoaDon || "No",
         InvoiceUrl: InvoiceUrl || null,
@@ -1894,6 +1891,7 @@ app.post("/api/b2b/services", async (req, res) => {
 
     if (error) throw error;
 
+    // --- [SỬA ĐỔI]: Gửi thông báo dựa trên cột is_accountant / is_director ---
     if (global.io) {
       const payload = {
         serviceId: data.STT,
@@ -1901,9 +1899,21 @@ app.post("/api/b2b/services", async (req, res) => {
         loaiDichVu: LoaiDichVu,
         message: "Có dịch vụ B2B mới chờ duyệt"
       };
-      // Báo cho kế toán/giám đốc duyệt
-      global.io.to("accountant").emit("b2b_new_service", payload);
-      global.io.to("director").emit("b2b_new_service", payload);
+
+      // 1. Tìm tất cả User là Kế toán HOẶC Giám đốc từ Database
+      const { data: managers } = await supabase
+        .from("User")
+        .select("id, is_accountant, is_director")
+        .or("is_accountant.eq.true,is_director.eq.true"); // Lọc user có quyền
+
+      // 2. Gửi thông báo đến từng người (theo Room ID cá nhân)
+      if (managers && managers.length > 0) {
+        managers.forEach(manager => {
+            // Giả định client đã join room "user_{id}" ở bước register_role
+            console.log(`🔔 Sending notification to Manager ID: ${manager.id}`);
+            global.io.to(`user_${manager.id}`).emit("b2b_new_service", payload);
+        });
+      }
     }
 
     res.json({ success: true, data, SoDuCu, SoDuMoi, ViDaTru: ViToDeduct });
