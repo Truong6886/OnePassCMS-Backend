@@ -2535,7 +2535,7 @@ app.post("/api/tuvan", async (req, res) => {
     }
 
     let insertData = {
-      TenDichVu,
+      TenDichVu:TenDichVu,
       CoSoTuVan: CoSoTuVan || null,
       TenHinhThuc,
       HoTen,
