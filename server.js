@@ -194,70 +194,8 @@ async function generateB2CServiceCode(supabase, loaiDichVu, yeuCauHoaDon) {
   return `${prefix}-${dateStr}-${invoiceCode}-${sequenceStr}`;
 }
 
-app.put("/api/yeucau/approve/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { userId } = req.body; // ID người thực hiện duyệt
 
-    // 1. Kiểm tra quyền hạn (Backend check)
-    const { data: user } = await supabase.from("User").select("is_accountant, is_director").eq("id", userId).single();
-    if (!user || (!user.is_accountant && !user.is_director)) {
-      return res.status(403).json({ success: false, message: "Bạn không có quyền duyệt dịch vụ này." });
-    }
 
-    // 2. Lấy thông tin yêu cầu hiện tại
-    const { data: currentReq, error: fetchError } = await supabase
-      .from("YeuCau")
-      .select("*")
-      .eq("YeuCauID", id)
-      .single();
-
-    if (fetchError || !currentReq) return res.status(404).json({ success: false, message: "Không tìm thấy yêu cầu" });
-
-    // Nếu đã có mã chuẩn rồi thì không sinh lại (tránh trùng lặp)
-    if (currentReq.MaHoSo && currentReq.MaHoSo.includes("-") && currentReq.MaHoSo.length > 10) {
-        return res.status(400).json({ success: false, message: "Yêu cầu này đã được cấp mã rồi." });
-    }
-
-    // 3. Sinh mã dịch vụ
-    const newServiceCode = await generateB2CServiceCode(supabase, currentReq.TenDichVu, currentReq.Invoice);
-
-    // 4. Cập nhật DB: Gán mã, chuyển trạng thái -> Đang xử lý
-    const { data: updatedData, error: updateError } = await supabase
-      .from("YeuCau")
-      .update({
-        MaHoSo: newServiceCode, // Lưu mã sinh được vào cột MaHoSo
-        TrangThai: "Đang xử lý", // Chuyển trạng thái
-      })
-      .eq("YeuCauID", id)
-      .select()
-      .single();
-
-    if (updateError) throw updateError;
-
-    res.json({ success: true, message: `Đã duyệt thành công. Mã dịch vụ: ${newServiceCode}`, data: updatedData });
-
-  } catch (err) {
-    console.error("❌ Approve Error:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-function translateServiceName(name) {
-    const map = {
-      "인증 센터": "Chứng thực",
-      "결혼 이민": "Kết hôn",
-      "출생신고 대행": "Khai sinh, khai tử",
-      "출입국 행정 대행": "Xuất nhập cảnh",
-      "신분증명 서류 대행": "Giấy tờ tuỳ thân",
-      "입양 절차 대행": "Nhận nuôi",
-      "비자 대행": "Thị thực",
-      "법률 컨설팅": "Tư vấn pháp lý",
-      "B2B 서비스": "Dịch vụ B2B",
-      "기타": "Khác",
-    };
-
-  return map[name?.trim()] || name?.trim() || "";
-}
 
 function tinhHangVaChietKhau(totalRevenue) {
   let hang = "New-bie";
@@ -493,7 +431,54 @@ io.engine.on("connection", (rawSocket) => {
     console.log("🔌 Raw socket closed:", reason);
   });
 });
+app.put("/api/yeucau/approve/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId } = req.body; // ID người thực hiện duyệt
 
+    // 1. Kiểm tra quyền hạn (Backend check)
+    const { data: user } = await supabase.from("User").select("is_accountant, is_director").eq("id", userId).single();
+    if (!user || (!user.is_accountant && !user.is_director)) {
+      return res.status(403).json({ success: false, message: "Bạn không có quyền duyệt dịch vụ này." });
+    }
+
+    // 2. Lấy thông tin yêu cầu hiện tại
+    const { data: currentReq, error: fetchError } = await supabase
+      .from("YeuCau")
+      .select("*")
+      .eq("YeuCauID", id)
+      .single();
+
+    if (fetchError || !currentReq) return res.status(404).json({ success: false, message: "Không tìm thấy yêu cầu" });
+
+    // Nếu đã có mã chuẩn rồi thì không sinh lại (tránh trùng lặp)
+    if (currentReq.MaHoSo && currentReq.MaHoSo.includes("-") && currentReq.MaHoSo.length > 10) {
+        return res.status(400).json({ success: false, message: "Yêu cầu này đã được cấp mã rồi." });
+    }
+
+    // 3. Sinh mã dịch vụ
+    const newServiceCode = await generateB2CServiceCode(supabase, currentReq.TenDichVu, currentReq.Invoice);
+
+    // 4. Cập nhật DB: Gán mã, chuyển trạng thái -> Đang xử lý
+    const { data: updatedData, error: updateError } = await supabase
+      .from("YeuCau")
+      .update({
+        MaHoSo: newServiceCode, // Lưu mã sinh được vào cột MaHoSo
+        TrangThai: "Đang xử lý", // Chuyển trạng thái
+      })
+      .eq("YeuCauID", id)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    res.json({ success: true, message: `Đã duyệt thành công. Mã dịch vụ: ${newServiceCode}`, data: updatedData });
+
+  } catch (err) {
+    console.error("❌ Approve Error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 // Health check cho Socket.io
 app.get("/api/socket-health", (req, res) => {
   const connectedClients = io.engine.clientsCount;
