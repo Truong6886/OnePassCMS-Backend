@@ -2541,6 +2541,7 @@ app.post("/api/tuvan", async (req, res) => {
       HoTen,
       MaVung,
       SoDienThoai,
+      LoaiDichVu: LoaiDichVu,
       Email: Email || null,
       TieuDe: TieuDe || null,
       NoiDung: NoiDung || null,
