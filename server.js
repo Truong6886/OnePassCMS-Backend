@@ -1839,7 +1839,6 @@ app.post("/api/b2b/services", async (req, res) => {
         SoTienChietKhau: 0,
         DoanhThuSauChietKhau: 0,
         Vi: 0,
-        TrangThai: initialStatus,
         CreatedAt: new Date().toISOString()
       }])
       .select()
@@ -1874,8 +1873,6 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
       .single();
 
     if (!current) return res.status(404).json({ success: false, message: "Không tìm thấy dịch vụ" });
-
-    let newStatus = current.TrangThai;
     let finalMaDichVu = current.ServiceID;
 
 
@@ -1939,7 +1936,6 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
         ServiceID: finalMaDichVu,
         NgayThucHien: NgayThucHien || current.NgayThucHien,
         NgayHoanThanh: NgayHoanThanh || current.NgayHoanThanh,
-        TrangThai: newStatus,
         
 
         DoanhThuTruocChietKhau: req.body.DoanhThuTruocChietKhau ?? current.DoanhThuTruocChietKhau,
