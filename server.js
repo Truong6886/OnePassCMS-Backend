@@ -1663,9 +1663,9 @@ app.get("/api/b2b/services", async (req, res) => {
     let query = supabase
       .from("B2B_SERVICES")
       // JOIN thêm bảng B2B_APPROVED để lấy SoDKKD
-      .select(`
+     .select(`
         *,
-        DoanhNghiep:B2B_APPROVED!DoanhNghiepID (SoDKKD, TenDoanhNghiep),
+        DoanhNghiep:B2B_APPROVED (SoDKKD, TenDoanhNghiep),
         NguoiPhuTrach:User!NguoiPhuTrachId (id, name, username)
       `, { count: "exact" });
 
