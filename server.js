@@ -1801,19 +1801,20 @@ app.get("/api/b2b/services/wallet", async (req, res) => {
   }
 });
 
+
 app.post("/api/b2b/services", async (req, res) => {
   try {
     const { 
       DoanhNghiepID, LoaiDichVu, TenDichVu, NgayThucHien,
-      NgayHoanThanh, ThuTucCapToc, YeuCauHoaDon, 
-      GhiChu, NguoiPhuTrachId 
+      NgayHoanThanh, YeuCauHoaDon, InvoiceUrl, 
+      GhiChu, NguoiPhuTrachId, GoiDichVu       
     } = req.body;
 
     if (!DoanhNghiepID || !LoaiDichVu) {
       return res.status(400).json({ success: false, message: "Thiếu dữ liệu bắt buộc" });
     }
 
-    // Admin tạo mới → không tính ví, không tính doanh thu
+    
     const initialStatus = "Chờ Kế toán duyệt";
 
     const { data, error } = await supabase
@@ -1827,9 +1828,13 @@ app.post("/api/b2b/services", async (req, res) => {
         NgayHoanThanh: NgayHoanThanh || null, 
         GhiChu: GhiChu || "",
         NguoiPhuTrachId: NguoiPhuTrachId || null, 
-        ThuTucCapToc: ThuTucCapToc || "No",
-        GoiDichVu: (ThuTucCapToc === "Yes" || ThuTucCapToc === "Có") ? "Cấp tốc" : "Thông thường",
-        YeuCauHoaDon: YeuCauHoaDon || "No",
+        
+      
+        InvoiceUrl: InvoiceUrl || "",                 
+        YeuCauHoaDon: YeuCauHoaDon || "No",       
+        GoiDichVu: GoiDichVu || "Thông thường",     
+  
+        
         DoanhThuTruocChietKhau: 0,
         SoTienChietKhau: 0,
         DoanhThuSauChietKhau: 0,
@@ -1850,14 +1855,16 @@ app.post("/api/b2b/services", async (req, res) => {
 });
 
 
+
 app.put("/api/b2b/services/update/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
     const { 
         LoaiDichVu, TenDichVu, NgayThucHien, NgayHoanThanh,
-        DoanhThuTruocChietKhau, Vi, YeuCauHoaDon, GhiChu,
-        ThuTucCapToc, NguoiPhuTrachId, approveAction
+        DoanhThuTruocChietKhau, Vi, GhiChu,
+        YeuCauHoaDon, InvoiceUrl, GoiDichVu, 
+        NguoiPhuTrachId, approveAction
     } = req.body;
 
     const { data: current } = await supabase
@@ -1871,9 +1878,7 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
     let newStatus = current.TrangThai;
     let finalMaDichVu = current.ServiceID;
 
-    // -----------------------------
-    // 🔥 KẾ TOÁN DUYỆT
-    // -----------------------------
+
     if (approveAction === "accountant_approve") {
 
       // Tính chiết khấu
@@ -1883,7 +1888,9 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
         .eq("DoanhNghiepID", current.DoanhNghiepID);
 
       const totalCurrent = ds?.reduce((sum, i) => sum + (i.DoanhThuSauChietKhau || 0), 0) ?? 0;
-      const { chietKhau } = tinhHangVaChietKhau(totalCurrent);
+      
+    
+      const { chietKhau } = tinhHangVaChietKhau(totalCurrent); 
 
       const dtInput = DoanhThuTruocChietKhau || 0;
       const soCK = Math.round((dtInput * chietKhau) / 100);
@@ -1908,25 +1915,22 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
           .eq("ID", current.DoanhNghiepID);
       }
 
-      // 🔥 Sinh mã
+
       finalMaDichVu = await generateServiceCode(
         supabase,
         LoaiDichVu || current.LoaiDichVu,
-        YeuCauHoaDon || current.YeuCauHoaDon
+        YeuCauHoaDon || current.YeuCauHoaDon 
       );
 
       newStatus = "Đã duyệt";
 
-      // Cập nhật vào payload update
       req.body.DoanhThuSauChietKhau = dtSau;
       req.body.SoTienChietKhau = soCK;
       req.body.MucChietKhau = chietKhau;
       req.body.TongDoanhThuTichLuy = totalCurrent + dtSau;
     }
 
-    // --------------------------------
-    // UPDATE CSDL
-    // --------------------------------
+
     const { data, error } = await supabase
       .from("B2B_SERVICES")
       .update({
@@ -1936,17 +1940,23 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
         NgayThucHien: NgayThucHien || current.NgayThucHien,
         NgayHoanThanh: NgayHoanThanh || current.NgayHoanThanh,
         TrangThai: newStatus,
+        
+
         DoanhThuTruocChietKhau: req.body.DoanhThuTruocChietKhau ?? current.DoanhThuTruocChietKhau,
         DoanhThuSauChietKhau: req.body.DoanhThuSauChietKhau ?? current.DoanhThuSauChietKhau,
         SoTienChietKhau: req.body.SoTienChietKhau ?? current.SoTienChietKhau,
         MucChietKhau: req.body.MucChietKhau ?? current.MucChietKhau,
         TongDoanhThuTichLuy: req.body.TongDoanhThuTichLuy ?? current.TongDoanhThuTichLuy,
         Vi: req.body.Vi ?? current.Vi,
+
+
         YeuCauHoaDon: YeuCauHoaDon || current.YeuCauHoaDon,
+        InvoiceUrl: InvoiceUrl || current.InvoiceUrl,    
+        GoiDichVu: GoiDichVu || current.GoiDichVu,  
+      
+        
         GhiChu: GhiChu || current.GhiChu,
         NguoiPhuTrachId: NguoiPhuTrachId || current.NguoiPhuTrachId,
-        ThuTucCapToc: ThuTucCapToc || current.ThuTucCapToc,
-        GoiDichVu: (ThuTucCapToc === "Yes" || ThuTucCapToc === "Có") ? "Cấp tốc" : "Thông thường",
         UpdatedAt: new Date().toISOString()
       })
       .eq("STT", id)
@@ -1962,7 +1972,6 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-
 
 app.post("/api/b2b/update", async (req, res) => {
   try {
