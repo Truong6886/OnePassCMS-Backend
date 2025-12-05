@@ -1813,23 +1813,28 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
     if (!current) return res.status(404).json({ success: false, message: "Không tìm thấy dịch vụ" });
     let finalMaDichVu = current.ServiceID;
 
-
+    // --- LOGIC DUYỆT ---
     if (approveAction === "accountant_approve") {
       if (userId) {
-         const { data: userCheck } = await supabase.from("User").select("is_accountant, is_director").eq("id", userId).single();
-         if (!userCheck || (!userCheck.is_accountant && !userCheck.is_director)) {
-             return res.status(403).json({ success: false, message: "Bạn không có quyền duyệt dịch vụ này (Cần quyền Kế toán/Giám đốc)." });
+       
+         const { data: userCheck } = await supabase
+            .from("User")
+            .select("is_director, perm_approve_b2b")
+            .eq("id", userId)
+            .single();
+            
+         if (!userCheck || (!userCheck.is_director && !userCheck.perm_approve_b2b)) {
+             return res.status(403).json({ success: false, message: "Bạn không có quyền duyệt dịch vụ B2B (Cần quyền Giám đốc hoặc được phân quyền)." });
          }
       }
-      // Tính chiết khấu
+      
+
       const { data: ds } = await supabase
         .from("B2B_SERVICES")
         .select("DoanhThuSauChietKhau")
         .eq("DoanhNghiepID", current.DoanhNghiepID);
 
       const totalCurrent = ds?.reduce((sum, i) => sum + (i.DoanhThuSauChietKhau || 0), 0) ?? 0;
-      
-    
       const { chietKhau } = tinhHangVaChietKhau(totalCurrent); 
 
       const dtInput = DoanhThuTruocChietKhau || 0;
@@ -1855,13 +1860,11 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
           .eq("ID", current.DoanhNghiepID);
       }
 
-
       finalMaDichVu = await generateServiceCode(
         supabase,
         LoaiDichVu || current.LoaiDichVu,
         YeuCauHoaDon || current.YeuCauHoaDon 
       );
-
 
       req.body.DoanhThuSauChietKhau = dtSau;
       req.body.SoTienChietKhau = soCK;
@@ -1869,30 +1872,25 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
       req.body.TongDoanhThuTichLuy = totalCurrent + dtSau;
     }
 
-
+  
     const { data, error } = await supabase
       .from("B2B_SERVICES")
       .update({
+        // ... giữ nguyên các trường ...
         LoaiDichVu: LoaiDichVu || current.LoaiDichVu,
         TenDichVu: TenDichVu || current.TenDichVu,
         ServiceID: finalMaDichVu,
         NgayThucHien: NgayThucHien || current.NgayThucHien,
         NgayHoanThanh: NgayHoanThanh || current.NgayHoanThanh,
-        
-
         DoanhThuTruocChietKhau: req.body.DoanhThuTruocChietKhau ?? current.DoanhThuTruocChietKhau,
         DoanhThuSauChietKhau: req.body.DoanhThuSauChietKhau ?? current.DoanhThuSauChietKhau,
         SoTienChietKhau: req.body.SoTienChietKhau ?? current.SoTienChietKhau,
         MucChietKhau: req.body.MucChietKhau ?? current.MucChietKhau,
         TongDoanhThuTichLuy: req.body.TongDoanhThuTichLuy ?? current.TongDoanhThuTichLuy,
         Vi: req.body.Vi ?? current.Vi,
-
-
         YeuCauHoaDon: YeuCauHoaDon || current.YeuCauHoaDon,
         InvoiceUrl: InvoiceUrl || current.InvoiceUrl,    
         GoiDichVu: GoiDichVu || current.GoiDichVu,  
-      
-        
         GhiChu: GhiChu || current.GhiChu,
         NguoiPhuTrachId: NguoiPhuTrachId || current.NguoiPhuTrachId,
         UpdatedAt: new Date().toISOString()
@@ -1902,7 +1900,6 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
       .single();
 
     if (error) throw error;
-
     res.json({ success: true, data, newCode: finalMaDichVu });
 
   } catch (err) {
@@ -2706,13 +2703,18 @@ app.post("/api/login", async (req, res) => {
 
     const userInfo = { 
       id: user.id, 
-      name:user.name,
+      name: user.name,
       username: user.username, 
       email: user.email, 
       is_admin: user.is_admin || false,
       is_accountant: user.is_accountant || false,
       is_director: user.is_director || false,
-      avatar: user.avatar 
+      is_staff: user.is_staff || false,
+      avatar: user.avatar,
+      perm_approve_b2b: user.perm_approve_b2b || false,
+      perm_approve_b2c: user.perm_approve_b2c || false,
+      perm_view_revenue: user.perm_view_revenue || false,
+      perm_view_staff: user.perm_view_staff || false
     };
 
     res.json({
