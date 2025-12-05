@@ -1681,6 +1681,7 @@ app.get("/api/b2b/services", async (req, res) => {
       ID: item.STT,
       DoanhNghiepID: item.DoanhNghiepID,
       SoDKKD: item.DoanhNghiep?.SoDKKD || "", 
+      TenDoanhNghiep: item.DoanhNghiep?.TenDoanhNghiep || "",
       MaDichVu: item.ServiceID,
       LoaiDichVu: item.LoaiDichVu,
       TenDichVu: item.TenDichVu,
