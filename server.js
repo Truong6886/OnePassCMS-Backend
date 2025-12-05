@@ -434,15 +434,16 @@ io.engine.on("connection", (rawSocket) => {
 app.put("/api/yeucau/approve/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { userId } = req.body; // ID người thực hiện duyệt
+    const { userId } = req.body; 
 
-    // 1. Kiểm tra quyền hạn (Backend check)
-    const { data: user } = await supabase.from("User").select("is_accountant, is_director").eq("id", userId).single();
-    if (!user || (!user.is_accountant && !user.is_director)) {
-      return res.status(403).json({ success: false, message: "Bạn không có quyền duyệt dịch vụ này." });
-    }
+   
+    const { data: user } = await supabase
+      .from("User")
+      .select("is_director, perm_approve_b2c") 
+      .eq("id", userId)
+      .single();
 
-    // 2. Lấy thông tin yêu cầu hiện tại
+   
     const { data: currentReq, error: fetchError } = await supabase
       .from("YeuCau")
       .select("*")
@@ -451,20 +452,19 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
 
     if (fetchError || !currentReq) return res.status(404).json({ success: false, message: "Không tìm thấy yêu cầu" });
 
-    // Nếu đã có mã chuẩn rồi thì không sinh lại (tránh trùng lặp)
+    
     if (currentReq.MaHoSo && currentReq.MaHoSo.includes("-") && currentReq.MaHoSo.length > 10) {
         return res.status(400).json({ success: false, message: "Yêu cầu này đã được cấp mã rồi." });
     }
 
-    // 3. Sinh mã dịch vụ
-    const newServiceCode = await generateB2CServiceCode(supabase, currentReq.TenDichVu, currentReq.Invoice);
+    
+    const newServiceCode = await generateB2CServiceCode(supabase, currentReq.LoaiDichVu, currentReq.Invoice);
 
-    // 4. Cập nhật DB: Gán mã, chuyển trạng thái -> Đang xử lý
+    
     const { data: updatedData, error: updateError } = await supabase
       .from("YeuCau")
       .update({
-        MaHoSo: newServiceCode, // Lưu mã sinh được vào cột MaHoSo
-        TrangThai: "Đang xử lý", // Chuyển trạng thái
+        MaHoSo: newServiceCode,
       })
       .eq("YeuCauID", id)
       .select()
