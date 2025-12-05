@@ -2645,10 +2645,10 @@ app.get("/api/doanhthu", async (req, res) => {
   try {
     const { userId } = req.query;
 
-    // 🔍 Lấy thông tin user
+    // 🔍 Lấy thông tin user (Cần thêm perm_view_revenue vào select)
     const { data: userData, error: userError } = await supabase
       .from("User")
-      .select("id, username, is_admin, is_accountant, is_director")
+      .select("id, username, is_admin, is_accountant, is_director, perm_view_revenue") 
       .eq("id", userId)
       .maybeSingle();
 
@@ -2656,17 +2656,15 @@ app.get("/api/doanhthu", async (req, res) => {
     if (!userData)
       return res.status(404).json({ success: false, message: "Không tìm thấy người dùng" });
 
-    const { is_admin, is_accountant, is_director } = userData;
-
-    // ✅ Chỉ admin, kế toán, giám đốc mới có quyền truy cập
-    if (!is_admin && !is_accountant && !is_director) {
+    const { is_accountant, is_director, perm_view_revenue } = userData;
+    if (!is_accountant && !is_director && !perm_view_revenue) {
       return res.status(403).json({
         success: false,
         message: "Bạn không có quyền truy cập doanh thu"
       });
     }
 
-    console.log("✅ Quyền hợp lệ:", { is_admin, is_accountant, is_director });
+    console.log("✅ Quyền hợp lệ:", { is_accountant, is_director, perm_view_revenue });
 
     // 👉 Truy vấn dữ liệu doanh thu
     const { data, error } = await supabase
