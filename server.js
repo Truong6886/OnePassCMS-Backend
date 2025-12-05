@@ -317,21 +317,28 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
 // ==== Init Express & Supabase ====
 const app = express();
 
-// CORS configuration - QUAN TRỌNG
-app.use(cors({
+// 1. Define CORS Options Explicitly
+const corsOptions = {
   origin: [
     "http://localhost:3000",
     "http://localhost:5173",
-    "https://www.onepasskr.com", 
+    "https://www.onepasskr.com",
     "https://b2bonepass.vercel.app",
     "https://onepass-gamma.vercel.app",
     "http://localhost:8080",
-    "https://onepasscms.vercel.app" 
+    "https://onepasscms.vercel.app"
   ],
-  methods: ["GET", "POST", "PUT", "DELETE"],
-  credentials: true
-}));
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"], 
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  credentials: true,
+  optionsSuccessStatus: 200
+};
 
+
+app.use(cors(corsOptions));
+
+
+app.options('*', cors(corsOptions));
 
 app.use(bodyParser.json());
 
