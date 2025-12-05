@@ -1815,7 +1815,7 @@ app.post("/api/b2b/services", async (req, res) => {
     }
 
     
-    const initialStatus = "Chờ Kế toán duyệt";
+    const initialStatus = "Chờ duyệt";
 
     const { data, error } = await supabase
       .from("B2B_SERVICES")
