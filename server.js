@@ -101,13 +101,13 @@ async function generateServiceCode(supabase, loaiDichVu, yeuCauHoaDon) {
     .from("B2B_SERVICES")
     .select("ServiceID")
     .like("ServiceID", searchString)
-    .order("ServiceID", { ascending: false })
+    .order("MaHoSo", { ascending: false })
     .limit(1)
     .maybeSingle();
 
   let nextSequence = 1;
-  if (lastRecord && lastRecord.ServiceID) {
-    const parts = lastRecord.ServiceID.split('-');
+  if (lastRecord && lastRecord.MaHoSo) {
+    const parts = lastRecord.MaHoSo.split('-');
     const lastNum = parseInt(parts[parts.length - 1]);
     if (!isNaN(lastNum)) nextSequence = lastNum + 1;
   }
