@@ -1183,35 +1183,27 @@ app.put("/api/b2b/pending/:id", async (req, res) => {
 // [SỬA] Tạo User (Email có thể null)
 app.post("/api/User", async (req, res) => {
   try {
-    const { username, password, email, name, role } = req.body;
+    // Nhận trực tiếp các cờ boolean từ frontend
+    const { username, password, email, name, is_admin, is_director, is_accountant, is_staff } = req.body;
     
-    // Chỉ kiểm tra username và password, bỏ kiểm tra email
     if (!username || !password) {
       return res.status(400).json({ success: false, message: "Thiếu tên đăng nhập hoặc mật khẩu" });
     }
 
-    // Xử lý email: Nếu rỗng thì gán là null
     const emailValue = email && email.trim() !== "" ? email.trim() : null;
 
-    // Chỉ kiểm tra trùng email nếu email có giá trị (không phải null)
     if (emailValue) {
       const { data: existingUser } = await supabase
         .from("User")
         .select("id")
         .eq("email", emailValue)
         .maybeSingle();
-
       if (existingUser) {
-        return res.status(400).json({ success: false, message: "Email này đã được sử dụng bởi tài khoản khác!" });
+        return res.status(400).json({ success: false, message: "Email này đã được sử dụng!" });
       }
     }
 
-    // Hash mật khẩu
     const hashedPassword = await bcrypt.hash(password, 10);
-    const is_admin = role === "admin";
-    const is_director = role === "director";
-    const is_accountant = role === "accountant";
-    const is_staff = role === "staff";
 
     const { data, error } = await supabase
       .from("User")
@@ -1220,21 +1212,17 @@ app.post("/api/User", async (req, res) => {
         email: emailValue, 
         password_hash: hashedPassword, 
         name: name || username,
-        is_admin,
-        is_director,
-        is_accountant,
-        is_staff
+        is_admin: is_admin || false,         // Lưu quyền Admin
+        is_director: is_director || false,   // Lưu quyền Giám đốc
+        is_accountant: is_accountant || false, // Lưu quyền Kế toán (Duyệt B2B/B2C)
+        is_staff: is_staff || false          // Lưu quyền Nhân viên
       }])
       .select();
 
     if (error) throw error;
-
     res.json({ success: true, message: "Tạo nhân viên thành công", data: data[0] });
   } catch (err) {
     console.error("❌ Lỗi tạo User:", err);
-    if (err.message && err.message.includes("User_email_key")) {
-       return res.status(400).json({ success: false, message: "Email đã tồn tại." });
-    }
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -1261,11 +1249,10 @@ app.delete("/api/User/:id", async (req, res) => {
 app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
   try {
     const { id } = req.params;
-    let { name, username, email, password, role } = req.body;
+    // Nhận các quyền từ body (true/false)
+    let { name, username, email, password, is_admin, is_director, is_accountant, is_staff } = req.body;
 
-    
     const emailValue = email && email.trim() !== "" ? email.trim() : null;
-
     if (emailValue) {
       const { data: existingEmail } = await supabase
         .from("User")
@@ -1273,7 +1260,6 @@ app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
         .eq("email", emailValue)
         .neq("id", id) 
         .maybeSingle();
-
       if (existingEmail) {
         return res.status(400).json({ success: false, message: "Email này đã thuộc về người khác!" });
       }
@@ -1282,40 +1268,17 @@ app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
     const updateData = {
       name,
       username,
-      email: emailValue, // Lưu giá trị đã xử lý (null hoặc string)
-      updated_at: new Date().toISOString()
+      email: emailValue,
+      updated_at: new Date().toISOString(),
+      is_admin: is_admin,
+      is_director: is_director,
+      is_accountant: is_accountant,
+      is_staff: is_staff
     };
-
-    if (role) {
-      updateData.is_admin = role === "admin";
-      updateData.is_director = role === "director";
-      updateData.is_accountant = role === "accountant";
-      updateData.is_staff = role === "staff";
-    }
 
     if (password && password.trim() !== "") {
       updateData.password_hash = await bcrypt.hash(password, 10);
     }
-
-    // // Xử lý upload avatar (Giữ nguyên)
-    // if (req.file) {
-    //   const fileExt = req.file.originalname.split(".").pop() || 'jpg';
-    //   const fileName = `avatar_${id}_${Date.now()}.${fileExt}`;
-
-    //   const { error: uploadError } = await supabase.storage
-    //     .from("avatars")
-    //     .upload(fileName, req.file.buffer, {
-    //       contentType: req.file.mimetype,
-    //       upsert: true
-    //     });
-
-    //   if (!uploadError) {
-    //     const { data: publicUrlData } = supabase.storage
-    //       .from("avatars")
-    //       .getPublicUrl(fileName);
-    //     updateData.avatar = publicUrlData.publicUrl;
-    //   }
-    // }
 
     const { data, error } = await supabase
       .from("User")
@@ -1324,40 +1287,9 @@ app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
       .select();
 
     if (error) throw error;
-
-    res.json({ success: true, data: data[0], message: "Cập nhật thành công" });
+    res.json({ success: true, data: data[0], message: "Cập nhật phân quyền thành công" });
   } catch (err) {
     console.error("Error updating user:", err);
-    if (err.message && err.message.includes("User_email_key")) {
-       return res.status(400).json({ success: false, message: "Email đã tồn tại." });
-    }
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-app.get("/api/b2b/reject", async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const from = (page - 1) * limit;
-    const to = from + limit - 1;
-
-    const { data: rejectedList, count, error } = await supabase
-      .from("B2B_REJECTED")
-      .select("*", { count: "exact" })
-      .order("NgayTao", { ascending: false })
-      .range(from, to);
-
-    if (error) throw error;
-
-    res.json({ 
-      success: true, 
-      data: rejectedList || [],
-      total: count,
-      page,
-      totalPages: Math.ceil(count / limit)
-    });
-  } catch (err) {
-    console.error("Error fetching B2B_REJECTED:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -1863,7 +1795,7 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
         LoaiDichVu, TenDichVu, NgayThucHien, NgayHoanThanh,
         DoanhThuTruocChietKhau, Vi, GhiChu,
         YeuCauHoaDon, InvoiceUrl, GoiDichVu, 
-        NguoiPhuTrachId, approveAction
+        NguoiPhuTrachId, approveAction, userId  
     } = req.body;
 
     const { data: current } = await supabase
@@ -1877,7 +1809,12 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
 
 
     if (approveAction === "accountant_approve") {
-
+      if (userId) {
+         const { data: userCheck } = await supabase.from("User").select("is_accountant, is_director").eq("id", userId).single();
+         if (!userCheck || (!userCheck.is_accountant && !userCheck.is_director)) {
+             return res.status(403).json({ success: false, message: "Bạn không có quyền duyệt dịch vụ này (Cần quyền Kế toán/Giám đốc)." });
+         }
+      }
       // Tính chiết khấu
       const { data: ds } = await supabase
         .from("B2B_SERVICES")
