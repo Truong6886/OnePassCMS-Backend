@@ -1919,7 +1919,6 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
         YeuCauHoaDon || current.YeuCauHoaDon 
       );
 
-      newStatus = "Đã duyệt";
 
       req.body.DoanhThuSauChietKhau = dtSau;
       req.body.SoTienChietKhau = soCK;
