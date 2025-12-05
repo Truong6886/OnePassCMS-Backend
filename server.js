@@ -431,19 +431,33 @@ io.engine.on("connection", (rawSocket) => {
     console.log("🔌 Raw socket closed:", reason);
   });
 });
+
+
 app.put("/api/yeucau/approve/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { userId } = req.body; 
-
+    
    
-    const { data: user } = await supabase
-      .from("User")
-      .select("is_director, perm_approve_b2c") 
-      .eq("id", userId)
-      .single();
+    const { 
+      userId, 
 
-   
+      HoTen, SoDienThoai, Email, MaVung,
+      LoaiDichVu, TenDichVu, GoiDichVu,
+      TenHinhThuc, CoSoTuVan,
+      ChonNgay, Gio, NoiDung, GhiChu,
+      // Các trường tài chính
+      DoanhThuTruocChietKhau, MucChietKhau, Vi 
+    } = req.body; 
+
+    // 2. Tính toán tài chính
+    const dtTruoc = parseInt(DoanhThuTruocChietKhau) || 0;
+    const phanTram = parseFloat(MucChietKhau) || 0;
+    const viTien = parseInt(Vi) || 0;
+    
+    const tienChietKhau = Math.round((dtTruoc * phanTram) / 100);
+    const dtSau = dtTruoc - tienChietKhau - viTien; 
+
+    
     const { data: currentReq, error: fetchError } = await supabase
       .from("YeuCau")
       .select("*")
@@ -452,19 +466,35 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
 
     if (fetchError || !currentReq) return res.status(404).json({ success: false, message: "Không tìm thấy yêu cầu" });
 
-    
-    if (currentReq.MaHoSo && currentReq.MaHoSo.includes("-") && currentReq.MaHoSo.length > 10) {
-        return res.status(400).json({ success: false, message: "Yêu cầu này đã được cấp mã rồi." });
+  
+    let newServiceCode = currentReq.MaHoSo;
+
+    if (!newServiceCode || newServiceCode.length < 5) {
+
+         newServiceCode = await generateB2CServiceCode(supabase, LoaiDichVu || currentReq.LoaiDichVu, currentReq.Invoice);
     }
 
-    
-    const newServiceCode = await generateB2CServiceCode(supabase, currentReq.LoaiDichVu, currentReq.Invoice);
 
-    
     const { data: updatedData, error: updateError } = await supabase
       .from("YeuCau")
       .update({
+    
+        HoTen, SoDienThoai, Email, MaVung,
+        LoaiDichVu, TenDichVu, GoiDichVu,
+        TenHinhThuc, CoSoTuVan,
+        ChonNgay, Gio, NoiDung, GhiChu,
+
+     
         MaHoSo: newServiceCode,
+       
+        NguoiPhuTrachId: userId, 
+        
+      
+        DoanhThuTruocChietKhau: dtTruoc,
+        MucChietKhau: phanTram,
+        SoTienChietKhau: tienChietKhau,
+        DoanhThuSauChietKhau: dtSau,
+        Vi: viTien
       })
       .eq("YeuCauID", id)
       .select()
@@ -472,7 +502,7 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
 
     if (updateError) throw updateError;
 
-    res.json({ success: true, message: `Đã duyệt thành công. Mã dịch vụ: ${newServiceCode}`, data: updatedData });
+    res.json({ success: true, message: `Duyệt thành công. Mã: ${newServiceCode}`, data: updatedData });
 
   } catch (err) {
     console.error("❌ Approve Error:", err);
