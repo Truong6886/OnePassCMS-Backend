@@ -417,59 +417,7 @@ const io = new Server(server, {
 global.io = io;
 
 
-io.on("connection", (socket) => {
-  console.log("📡 Client connected:", socket.id);
-  
- 
-  socket.conn.on("heartbeat", () => {
-  });
 
-  socket.on("disconnect", (reason) => {
-    console.log("❌ Client disconnected:", socket.id, "Reason:", reason);
-    
-  });
-
-  socket.on("error", (error) => {
-    console.error("Socket error:", error);
-  });
-
-
-  socket.emit("connected", { 
-    message: "Successfully connected to server",
-    socketId: socket.id,
-    timestamp: new Date().toISOString()
-  });
-});
-
-
-
-io.on("connection", (socket) => {
-  console.log("📡 Client connected:", socket.id);
-  
-  // Bật heartbeat để giữ kết nối
-  socket.conn.on("heartbeat", () => {
-  });
-
-  socket.on("error", (error) => {
-    console.error("Socket error:", error);
-  });
-
-  // Xác nhận kết nối thành công
-  socket.emit("connected", { 
-    message: "Successfully connected to server",
-    socketId: socket.id,
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Middleware để xử lý kết nối lại
-io.engine.on("connection", (rawSocket) => {
-  console.log("🔄 Raw connection established");
-  
-  rawSocket.on("close", (reason) => {
-    console.log("🔌 Raw socket closed:", reason);
-  });
-});
 
 
 app.put("/api/yeucau/approve/:id", async (req, res) => {
@@ -600,18 +548,7 @@ app.get("/api/socket-health", (req, res) => {
   });
 });
 
-// Socket.io connection handler
-io.on("connection", (socket) => {
-  console.log("📡 Client connected:", socket.id);
 
-  socket.on("disconnect", (reason) => {
-    console.log("❌ Client disconnected:", socket.id, "Reason:", reason);
-  });
-
-  socket.on("error", (error) => {
-    console.error("Socket error:", error);
-  });
-});
 app.post("/api/upload-cv", upload.single("file"), async (req, res) => {
   try {
     const file = req.file;
