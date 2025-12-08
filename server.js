@@ -348,7 +348,47 @@ const handleSupabaseError = (error) => {
   if (error) throw new Error(error.message || "Supabase error");
 };
 
+const verifySession = async (req, res, next) => {
+  try {
 
+    const authHeader = req.headers['authorization'];
+    const userId = req.headers['x-user-id'];
+
+    if (!authHeader || !userId) {
+
+      return next(); 
+    }
+
+    const clientToken = authHeader.split(' ')[1]; 
+
+    const { data, error } = await supabase
+      .from("User")
+      .select("session_token")
+      .eq("id", userId)
+      .single();
+
+    if (error || !data) {
+      return res.status(401).json({ success: false, message: "User không tồn tại or Lỗi DB", code: "SESSION_INVALID" });
+    }
+
+    // SO SÁNH: Nếu token client gửi lên KHÁC token trong DB -> Đã có người khác đăng nhập
+    if (data.session_token !== clientToken) {
+      return res.status(401).json({ 
+        success: false, 
+        message: "Tài khoản đã được đăng nhập ở nơi khác. Vui lòng đăng nhập lại.", 
+        code: "SESSION_EXPIRED" 
+      });
+    }
+
+    next(); // Token khớp, cho phép đi tiếp
+  } catch (err) {
+    console.error("Session check error:", err);
+    res.status(500).json({ success: false, message: "Lỗi kiểm tra phiên" });
+  }
+};
+
+
+app.use('/api', verifySession);
 const server = http.createServer(app);
 
 
@@ -507,6 +547,48 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
     console.error("❌ Approve Error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
+});
+const userSocketMap = new Map();
+
+io.on("connection", (socket) => {
+  console.log("📡 Client connected:", socket.id);
+
+  // [THÊM MỚI] Xử lý đăng nhập 1 thiết bị
+  socket.on("register_user", (userId) => {
+    if (!userId) return;
+
+    const oldSocketId = userSocketMap.get(String(userId));
+
+    // Nếu user này đã có socketId cũ và khác với socket hiện tại
+    if (oldSocketId && oldSocketId !== socket.id) {
+      console.log(`⚠️ User ${userId} logged in elsewhere. Kicking socket ${oldSocketId}`);
+      // Gửi lệnh logout đến thiết bị cũ
+      io.to(oldSocketId).emit("force_logout", "Tài khoản của bạn đã được đăng nhập ở thiết bị khác.");
+    }
+
+    
+    userSocketMap.set(String(userId), socket.id);
+    socket.userId = String(userId); 
+    console.log(`✅ Registered user ${userId} with socket ${socket.id}`);
+  });
+
+  socket.on("disconnect", (reason) => {
+    console.log("❌ Client disconnected:", socket.id, "Reason:", reason);
+   
+    if (socket.userId && userSocketMap.get(socket.userId) === socket.id) {
+      userSocketMap.delete(socket.userId);
+    }
+  });
+
+  socket.on("error", (error) => {
+    console.error("Socket error:", error);
+  });
+
+  socket.emit("connected", { 
+    message: "Successfully connected to server",
+    socketId: socket.id,
+    timestamp: new Date().toISOString()
+  });
 });
 // Health check cho Socket.io
 app.get("/api/socket-health", (req, res) => {
@@ -2830,6 +2912,18 @@ app.post("/api/login", async (req, res) => {
     const match = await bcrypt.compare(password, user.password_hash);
     if (!match) return res.status(401).json({ success: false, message: "Sai mật khẩu" });
 
+
+    const sessionToken = crypto.randomBytes(32).toString("hex");
+
+  
+    const { error: updateError } = await supabase
+      .from("User")
+      .update({ session_token: sessionToken })
+      .eq("id", user.id);
+
+    if (updateError) throw updateError;
+    // ----------------------------------------------
+
     const userInfo = { 
       id: user.id, 
       name: user.name,
@@ -2846,9 +2940,11 @@ app.post("/api/login", async (req, res) => {
       perm_view_staff: user.perm_view_staff || false
     };
 
+    // Trả về thêm session_token
     res.json({
       success: true,
-      user: userInfo
+      user: userInfo,
+      token: sessionToken // Gửi token về cho client lưu
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -2893,6 +2989,8 @@ app.post("/api/register", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
+
 app.get("/api/fix-mahoso", async (req, res) => {
   try {
     const { data: yeuCauList, error } = await supabase.from("YeuCau").select("*");
