@@ -1290,6 +1290,7 @@ app.delete("/api/User/:id", async (req, res) => {
   }
 });
 
+// [CẬP NHẬT SỬA LỖI 500] PUT Update User
 app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
   try {
     const { id } = req.params;
@@ -1300,28 +1301,33 @@ app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
       ChucDanh, PhongBan, MaVung, SoDienThoai, NgayVaoLam, LoaiHopDong, CV
     } = req.body;
 
-    const emailValue = email && email.trim() !== "" ? email.trim() : null;
+    
+    const cleanEmail = email && email.trim() !== "" ? email.trim() : null;
+    const cleanDate = (dateStr) => (dateStr && dateStr.trim() !== "" ? dateStr : null); 
 
     const updateData = {
       name,
       username,
-      email: emailValue,
+      email: cleanEmail,
       updated_at: new Date().toISOString(),
-      is_admin: is_admin,
-      is_director: is_director,
-      is_accountant: is_accountant,
-      is_staff: is_staff,
-      perm_approve_b2b: perm_approve_b2b,
-      perm_approve_b2c: perm_approve_b2c,
-      perm_view_revenue: perm_view_revenue,
-      perm_view_staff: perm_view_staff,
-     
-      ChucDanh, PhongBan, MaVung, SoDienThoai, NgayVaoLam, LoaiHopDong, CV
+      is_admin, is_director, is_accountant, is_staff,
+      perm_approve_b2b, perm_approve_b2c, perm_view_revenue, perm_view_staff,
+      
+
+      ChucDanh: ChucDanh || null,
+      PhongBan: PhongBan || null,
+      MaVung: MaVung || "+84",
+      SoDienThoai: SoDienThoai || null,
+      NgayVaoLam: cleanDate(NgayVaoLam),
+      LoaiHopDong: LoaiHopDong || null,
+      CV: CV || null
     };
 
+    
     if (password && password.trim() !== "") {
       updateData.password_hash = await bcrypt.hash(password, 10);
     }
+
 
     const { data, error } = await supabase
       .from("User")
@@ -1331,14 +1337,16 @@ app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
 
     if (error) throw error;
 
- 
+
+
     const updatedUser = data[0];
     delete updatedUser.password_hash;
 
     res.json({ success: true, data: updatedUser, message: "Cập nhật thành công" });
+
   } catch (err) {
     console.error("Error updating user:", err);
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: "Lỗi Server: " + err.message });
   }
 });
 app.post("/api/b2b/pending/:id/reject", async (req, res) => {
