@@ -530,6 +530,48 @@ io.on("connection", (socket) => {
     console.error("Socket error:", error);
   });
 });
+app.post("/api/upload-cv", upload.single("file"), async (req, res) => {
+  try {
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({ success: false, message: "Vui lòng chọn file" });
+    }
+
+
+    const fileExt = file.originalname.split(".").pop();
+    const fileName = `cv_${Date.now()}_${Math.round(Math.random() * 1000)}.${fileExt}`;
+
+
+    const { data, error } = await supabase.storage
+      .from("cv") 
+      .upload(fileName, file.buffer, {
+        contentType: file.mimetype,
+        upsert: false,
+      });
+
+    if (error) throw error;
+
+    // 3. Lấy Public URL để lưu vào DB
+    const { data: publicUrlData } = supabase.storage
+      .from("cv")
+      .getPublicUrl(fileName);
+
+    if (!publicUrlData || !publicUrlData.publicUrl) {
+        throw new Error("Không lấy được đường dẫn file");
+    }
+
+    // 4. Trả link về cho Frontend
+    res.json({ 
+      success: true, 
+      message: "Upload thành công", 
+      url: publicUrlData.publicUrl 
+    });
+
+  } catch (err) {
+    console.error("❌ Lỗi upload CV:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 // ================= EMAIL LIST =================
 app.get("/api/email", async (req, res) => {
   try {
