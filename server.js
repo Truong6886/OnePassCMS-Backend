@@ -408,7 +408,6 @@ io.on("connection", (socket) => {
   
   // Bật heartbeat để giữ kết nối
   socket.conn.on("heartbeat", () => {
-    console.log("Heartbeat received from:", socket.id);
   });
 
   socket.on("error", (error) => {
