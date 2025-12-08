@@ -501,25 +501,24 @@ const userSocketMap = new Map();
 io.on("connection", (socket) => {
   console.log("📡 Client connected:", socket.id);
 
-  // [THÊM MỚI] Xử lý đăng nhập 1 thiết bị
-  socket.on("register_user", (userId) => {
+  
+socket.on("register_user", (userId) => {
     if (!userId) return;
 
     const oldSocketId = userSocketMap.get(String(userId));
 
-    // Nếu user này đã có socketId cũ và khác với socket hiện tại
+  
     if (oldSocketId && oldSocketId !== socket.id) {
-      console.log(`⚠️ User ${userId} logged in elsewhere. Kicking socket ${oldSocketId}`);
-      // Gửi lệnh logout đến thiết bị cũ
+      console.log(`⚠️ Gửi lệnh logout đến máy cũ: ${oldSocketId}`);
+      
+
       io.to(oldSocketId).emit("force_logout", "Tài khoản của bạn đã được đăng nhập ở thiết bị khác.");
     }
 
-    
+    // Cập nhật socketId mới nhất cho User
     userSocketMap.set(String(userId), socket.id);
     socket.userId = String(userId); 
-    console.log(`✅ Registered user ${userId} with socket ${socket.id}`);
-  });
-
+});
   socket.on("disconnect", (reason) => {
     console.log("❌ Client disconnected:", socket.id, "Reason:", reason);
    
