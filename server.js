@@ -2454,7 +2454,6 @@ app.post("/api/tuvan", async (req, res) => {
       Email,
       MaVung,
       SoDienThoai,
-      TieuDe,
       LoaiDichVu,
       NoiDung,
       ChonNgay,
@@ -2466,17 +2465,19 @@ app.post("/api/tuvan", async (req, res) => {
     if (!TenDichVu || !HoTen || !MaVung || !SoDienThoai) {
       return res.status(400).json({ success: false, message: "Thiếu dữ liệu bắt buộc" });
     }
+    const viTenDichVu = translateServiceName(TenDichVu); 
+    const viLoaiDichVu = translateServiceName(LoaiDichVu || TenDichVu);
+    const viCoSo = translateBranchName(CoSoTuVan);
 
     let insertData = {
-      TenDichVu:TenDichVu,
-      CoSoTuVan: CoSoTuVan || null,
+      TenDichVu: viTenDichVu,
+      CoSoTuVan: viCoSo || null,
       TenHinhThuc,
       HoTen,
       MaVung,
       SoDienThoai,
-      LoaiDichVu: LoaiDichVu,
+      LoaiDichVu: viLoaiDichVu,
       Email: Email || null,
-      TieuDe: TieuDe || null,
       NoiDung: NoiDung || null,
       ChonNgay: null,
       Gio: null,
@@ -2563,7 +2564,6 @@ app.post("/api/tuvan", async (req, res) => {
             <p><b>Hình thức liên hệ:</b> ${fullRecord.TenHinhThuc}</p>
             <p><b>Số điện thoại:</b> ${fullRecord.MaVung}${fullRecord.SoDienThoai}</p>
             <p><b>Email khách:</b> ${fullRecord.Email || "Không có"}</p>
-            <p><b>Tiêu đề:</b> ${fullRecord.TieuDe || "Không có"}</p>
             <p><b>Nội dung:</b> ${fullRecord.NoiDung || "Không có"}</p>
           </div>
 
