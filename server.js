@@ -1215,7 +1215,8 @@ app.post("/api/User", async (req, res) => {
     const { 
       username, password, email, name, 
       is_admin, is_director, is_accountant, is_staff,
-      perm_approve_b2b, perm_approve_b2c, perm_view_revenue, perm_view_staff 
+      perm_approve_b2b, perm_approve_b2c, perm_view_revenue, perm_view_staff,
+      ChucDanh, PhongBan, MaVung, SoDienThoai, NgayVaoLam, LoaiHopDong, CV
     } = req.body;
     
     if (!username || !password) {
@@ -1224,6 +1225,7 @@ app.post("/api/User", async (req, res) => {
 
     const emailValue = email && email.trim() !== "" ? email.trim() : null;
 
+    // Check trùng email
     if (emailValue) {
       const { data: existingUser } = await supabase
         .from("User")
@@ -1248,16 +1250,22 @@ app.post("/api/User", async (req, res) => {
         is_director: is_director || false,
         is_accountant: is_accountant || false,
         is_staff: is_staff || false,
-        // Lưu quyền chi tiết
         perm_approve_b2b: perm_approve_b2b || false,
         perm_approve_b2c: perm_approve_b2c || false,
         perm_view_revenue: perm_view_revenue || false,
-        perm_view_staff: perm_view_staff || false
+        perm_view_staff: perm_view_staff || false,
+
+        ChucDanh, PhongBan, MaVung, SoDienThoai, NgayVaoLam, LoaiHopDong, CV
       }])
       .select();
 
     if (error) throw error;
-    res.json({ success: true, message: "Tạo nhân viên thành công", data: data[0] });
+    
+  
+    const createdUser = data[0];
+    delete createdUser.password_hash;
+
+    res.json({ success: true, message: "Tạo nhân viên thành công", data: createdUser });
   } catch (err) {
     console.error("❌ Lỗi tạo User:", err);
     res.status(500).json({ success: false, message: err.message });
@@ -1289,11 +1297,11 @@ app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
     let { 
       name, username, email, password, 
       is_admin, is_director, is_accountant, is_staff,
-      perm_approve_b2b, perm_approve_b2c, perm_view_revenue, perm_view_staff 
+      perm_approve_b2b, perm_approve_b2c, perm_view_revenue, perm_view_staff,
+      ChucDanh, PhongBan, MaVung, SoDienThoai, NgayVaoLam, LoaiHopDong, CV
     } = req.body;
 
     const emailValue = email && email.trim() !== "" ? email.trim() : null;
-    // ... (logic kiểm tra email giữ nguyên)
 
     const updateData = {
       name,
@@ -1304,12 +1312,12 @@ app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
       is_director: is_director,
       is_accountant: is_accountant,
       is_staff: is_staff,
-      // Cập nhật quyền chi tiết
-      perm_approve_b2b: perm_approve_b2c, // Lưu ý frontend gửi đúng key
       perm_approve_b2b: perm_approve_b2b,
       perm_approve_b2c: perm_approve_b2c,
       perm_view_revenue: perm_view_revenue,
-      perm_view_staff: perm_view_staff
+      perm_view_staff: perm_view_staff,
+     
+      ChucDanh, PhongBan, MaVung, SoDienThoai, NgayVaoLam, LoaiHopDong, CV
     };
 
     if (password && password.trim() !== "") {
@@ -1323,7 +1331,12 @@ app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
       .select();
 
     if (error) throw error;
-    res.json({ success: true, data: data[0], message: "Cập nhật thành công" });
+
+ 
+    const updatedUser = data[0];
+    delete updatedUser.password_hash;
+
+    res.json({ success: true, data: updatedUser, message: "Cập nhật thành công" });
   } catch (err) {
     console.error("Error updating user:", err);
     res.status(500).json({ success: false, message: err.message });
@@ -2285,12 +2298,50 @@ app.set("socketio", io);
 // GET all Users
 app.get("/api/User", async (req, res) => {
   try {
-    const { data, error } = await supabase
+  
+    const { data: users, error: userError } = await supabase
       .from("User")
-      .select("id, name, username, email, is_admin, is_accountant, is_director, is_staff, perm_approve_b2b, perm_approve_b2c, perm_view_revenue, perm_view_staff, avatar")
+      .select(`
+        id, name, username, email, avatar, updated_at,
+        is_admin, is_director, is_accountant, is_staff,
+        role,
+        perm_approve_b2b, perm_approve_b2c, perm_view_revenue, perm_view_staff,
+        ChucDanh, PhongBan, MaVung, SoDienThoai, NgayVaoLam, LoaiHopDong, CV
+      `)
       .order("id", { ascending: true });
-    handleSupabaseError(error);
-    res.json({ success: true, data });
+    
+    if (userError) throw userError;
+
+   
+    const { data: b2cData, error: b2cError } = await supabase
+      .from("YeuCau")
+      .select("NguoiPhuTrachId, DoanhThuSauChietKhau");
+    
+    if (b2cError) throw b2cError;
+
+    const { data: b2bData, error: b2bError } = await supabase
+      .from("B2B_SERVICES")
+      .select("NguoiPhuTrachId, DoanhThuSauChietKhau");
+
+    if (b2bError) throw b2bError;
+
+    const enrichedUsers = users.map(user => {
+
+      const totalB2C = b2cData
+        .filter(item => item.NguoiPhuTrachId === user.id)
+        .reduce((sum, item) => sum + (item.DoanhThuSauChietKhau || 0), 0);
+     
+      const totalB2B = b2bData
+        .filter(item => item.NguoiPhuTrachId === user.id)
+        .reduce((sum, item) => sum + (item.DoanhThuSauChietKhau || 0), 0);
+
+      return {
+        ...user,
+        DoanhThu: totalB2C + totalB2B 
+      };
+    });
+
+    res.json({ success: true, data: enrichedUsers });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
