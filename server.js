@@ -496,93 +496,34 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-app.get("/api/check-session", async (req, res) => {
-  try {
-    const authHeader = req.headers['authorization'];
-    const userId = req.headers['x-user-id'];
-
-    if (!authHeader || !userId) {
-      return res.status(401).json({ 
-        success: false, 
-        message: "Không có thông tin xác thực",
-        code: "SESSION_INVALID"
-      });
-    }
-
-    const clientToken = authHeader.split(' ')[1];
-
-    const { data, error } = await supabase
-      .from("User")
-      .select("session_token")
-      .eq("id", userId)
-      .single();
-
-    if (error || !data) {
-      return res.status(401).json({ 
-        success: false, 
-        message: "User không tồn tại",
-        code: "SESSION_INVALID"
-      });
-    }
-
-    // SO SÁNH: Nếu token client gửi lên KHÁC token trong DB
-    if (data.session_token !== clientToken) {
-      return res.status(401).json({ 
-        success: false, 
-        message: "Tài khoản đã được đăng nhập ở nơi khác.", 
-        code: "SESSION_EXPIRED" 
-      });
-    }
-
-    res.json({ 
-      success: true, 
-      message: "Session hợp lệ",
-      valid: true 
-    });
-  } catch (err) {
-    console.error("Session check error:", err);
-    res.status(500).json({ success: false, message: "Lỗi kiểm tra phiên" });
-  }
-});
 const userSocketMap = new Map();
 
 io.on("connection", (socket) => {
   console.log("📡 Client connected:", socket.id);
 
-  socket.on("register_user", (userId) => {
+  
+socket.on("register_user", (userId) => {
     if (!userId) return;
 
     const oldSocketId = userSocketMap.get(String(userId));
 
+  
     if (oldSocketId && oldSocketId !== socket.id) {
       console.log(`⚠️ Gửi lệnh logout đến máy cũ: ${oldSocketId}`);
       
-      // Gửi force_logout ngay lập tức
+
       io.to(oldSocketId).emit("force_logout", "Tài khoản của bạn đã được đăng nhập ở thiết bị khác.");
-      
-      // Đảm bảo disconnect socket cũ
-      setTimeout(() => {
-        const oldSocket = io.sockets.sockets.get(oldSocketId);
-        if (oldSocket) {
-          oldSocket.disconnect(true); // Force disconnect
-        }
-      }, 100);
     }
 
     // Cập nhật socketId mới nhất cho User
     userSocketMap.set(String(userId), socket.id);
-    socket.userId = String(userId);
-    
-    console.log(`✅ User ${userId} registered với socket ${socket.id}`);
-  });
-
+    socket.userId = String(userId); 
+});
   socket.on("disconnect", (reason) => {
     console.log("❌ Client disconnected:", socket.id, "Reason:", reason);
-    
-    // Xóa khỏi map nếu socket này đang được map
+   
     if (socket.userId && userSocketMap.get(socket.userId) === socket.id) {
       userSocketMap.delete(socket.userId);
-      console.log(`🗑️ Removed user ${socket.userId} from socket map`);
     }
   });
 
@@ -646,6 +587,47 @@ app.post("/api/upload-cv", upload.single("file"), async (req, res) => {
 
   } catch (err) {
     console.error("❌ Lỗi upload CV:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+app.post("/api/upload-invoice", upload.single("file"), async (req, res) => {
+  try {
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({ success: false, message: "Vui lòng chọn file" });
+    }
+
+    // Tạo tên file unique
+    const fileExt = file.originalname.split(".").pop();
+    const fileName = `invoice_${Date.now()}_${Math.round(Math.random() * 1000)}.${fileExt}`;
+
+    // Upload vào bucket "invoice" (Bạn cần tạo bucket này trên Supabase và set Public)
+    const { data, error } = await supabase.storage
+      .from("invoice") 
+      .upload(fileName, file.buffer, {
+        contentType: file.mimetype,
+        upsert: false,
+      });
+
+    if (error) throw error;
+
+    // Lấy Public URL
+    const { data: publicUrlData } = supabase.storage
+      .from("invoice")
+      .getPublicUrl(fileName);
+
+    if (!publicUrlData || !publicUrlData.publicUrl) {
+        throw new Error("Không lấy được đường dẫn file");
+    }
+
+    res.json({ 
+      success: true, 
+      message: "Upload thành công", 
+      url: publicUrlData.publicUrl 
+    });
+
+  } catch (err) {
+    console.error("❌ Lỗi upload Invoice:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
