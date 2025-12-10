@@ -2476,17 +2476,6 @@ app.delete("/api/yeucau/:id", async (req, res) => {
 });
 
 
-
-
-
-
-
-
-
-
-
-
-
 app.put("/api/yeucau/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -2538,23 +2527,37 @@ app.put("/api/yeucau/:id", async (req, res) => {
 });
 
 
-// GET all YeuCau
 app.get("/api/yeucau", async (req, res) => {
   try {
-    const { userId, is_admin, page = 1, limit = 20 } = req.query;
+    // 1. Lấy thêm các tham số role từ req.query
+    const { 
+      userId, 
+      is_admin, 
+      is_staff,       // Thêm is_staff
+      is_director,    // Thêm is_director
+      is_accountant,  // Thêm is_accountant
+      page = 1, 
+      limit = 20 
+    } = req.query;
 
-    console.log("📥 Fetching YeuCau | userId:", userId, "| is_admin:", is_admin, "| page:", page, "| limit:", limit);
+    console.log("📥 Fetching YeuCau | userId:", userId, "Roles:", { is_admin, is_staff });
 
+    // 2. Hàm helper để kiểm tra giá trị boolean (vì query param gửi lên là chuỗi "true")
+    const hasRole = (val) => val === true || val === "true";
 
-    const isAdmin = is_admin === true || is_admin === "true";
-
+    // 3. Xác định xem người dùng có quyền xem "Tổng quan" (Tất cả) hay không
+    const canViewAll = 
+      hasRole(is_admin) || 
+      hasRole(is_staff) || 
+      hasRole(is_director) || 
+      hasRole(is_accountant);
 
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
     const pageLimit = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
     const from = (pageNum - 1) * pageLimit;
     const to = from + pageLimit - 1;
 
-    // ✅ Tạo query
+    // ✅ Tạo query cơ bản
     let query = supabase
       .from("YeuCau")
       .select(
@@ -2572,10 +2575,12 @@ app.get("/api/yeucau", async (req, res) => {
       .order("YeuCauID", { ascending: true }) 
       .range(from, to);
 
-    // ✅ Nếu không phải admin → lọc theo người phụ trách
-    if (!isAdmin && userId) {
-      console.log("🔒 Lọc theo NguoiPhuTrachId =", userId);
+ 
+    if (!canViewAll && userId) {
+      console.log("🔒 Restricted: Lọc theo NguoiPhuTrachId =", userId);
       query = query.eq("NguoiPhuTrachId", parseInt(userId, 10));
+    } else {
+      console.log("🔓 Full Access: Hiển thị toàn bộ danh sách");
     }
 
     const { data, count, error } = await query;
@@ -2583,10 +2588,6 @@ app.get("/api/yeucau", async (req, res) => {
 
     const total = count ?? 0;
     const totalPages = Math.ceil(total / pageLimit);
-
-    console.log(
-      `✅ Trả về ${data?.length || 0} yêu cầu (page ${pageNum}/${totalPages}) - total: ${total}`
-    );
 
     res.json({
       success: true,
