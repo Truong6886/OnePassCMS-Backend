@@ -2555,10 +2555,84 @@ app.get("/api/b2b/reject", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+// ... (Các đoạn code cũ)
+
+// ================= VENDOR API =================
+
+// 1. Lấy danh sách Vendor
+app.get("/api/vendors", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("Vendors")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 2. Thêm Vendor mới
+app.post("/api/vendors", async (req, res) => {
+  try {
+    const { name, business_license_id, address, contact_person, area_code, phone, email, services, notes } = req.body;
+
+    if (!name) return res.status(400).json({ success: false, message: "Tên Vendor là bắt buộc" });
+
+    const { data, error } = await supabase
+      .from("Vendors")
+      .insert([{
+        name, business_license_id, address, contact_person, area_code, phone, email, services, notes
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json({ success: true, message: "Thêm vendor thành công", data });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 3. Cập nhật Vendor
+app.put("/api/vendors/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updateData = req.body;
+
+    const { data, error } = await supabase
+      .from("Vendors")
+      .update(updateData)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json({ success: true, message: "Cập nhật thành công", data });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
+app.delete("/api/vendors/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { error } = await supabase.from("Vendors").delete().eq("id", id);
+    if (error) throw error;
+    res.json({ success: true, message: "Đã xóa vendor" });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
 app.get("/api/yeucau", async (req, res) => {
   try {
-
-   const { 
+    const { 
       userId, 
       is_admin, 
       is_staff,       
@@ -2572,7 +2646,7 @@ app.get("/api/yeucau", async (req, res) => {
 
     const hasRole = (val) => val === true || val === "true";
 
-  
+    // Xác định quyền xem tất cả
     const canViewAll = 
       hasRole(is_admin) || 
       hasRole(is_director) || 
@@ -2601,7 +2675,7 @@ app.get("/api/yeucau", async (req, res) => {
       .order("YeuCauID", { ascending: true }) 
       .range(from, to);
 
- 
+  
     if (!canViewAll && userId) {
       console.log("🔒 Restricted: Lọc theo NguoiPhuTrachId =", userId);
       query = query.eq("NguoiPhuTrachId", parseInt(userId, 10));
