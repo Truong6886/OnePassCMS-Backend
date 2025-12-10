@@ -2702,7 +2702,41 @@ app.get("/api/yeucau", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+// Thêm vào server.js
 
+app.post("/api/verify-password", async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    
+    if (!username || !password) {
+      return res.status(400).json({ success: false, message: "Thiếu thông tin xác thực" });
+    }
+
+    // 1. Lấy hash mật khẩu từ DB
+    const { data, error } = await supabase
+      .from("User")
+      .select("password_hash")
+      .eq("username", username)
+      .maybeSingle();
+
+    if (error || !data) {
+      return res.status(404).json({ success: false, message: "User không tồn tại" });
+    }
+
+    // 2. So sánh mật khẩu
+    const match = await bcrypt.compare(password, data.password_hash);
+    if (!match) {
+      return res.status(401).json({ success: false, message: "Mật khẩu không chính xác" });
+    }
+
+    // 3. Trả về thành công mà KHÔNG cập nhật session_token
+    res.json({ success: true, message: "Xác thực thành công" });
+
+  } catch (err) {
+    console.error("Lỗi verify-password:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 app.post("/api/tuvan", async (req, res) => {
   try {
