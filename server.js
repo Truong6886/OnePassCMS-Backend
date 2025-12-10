@@ -1894,10 +1894,12 @@ app.get("/api/b2b/services/wallet", async (req, res) => {
 
 app.post("/api/b2b/services", async (req, res) => {
   try {
+  
     const { 
       DoanhNghiepID, LoaiDichVu, TenDichVu, NgayThucHien,
       NgayHoanThanh, YeuCauHoaDon, InvoiceUrl, 
-      GhiChu, NguoiPhuTrachId, GoiDichVu       
+      GhiChu, NguoiPhuTrachId, GoiDichVu,
+      DoanhThuTruocChietKhau, Vi  
     } = req.body;
 
     if (!DoanhNghiepID || !LoaiDichVu) {
@@ -1905,7 +1907,10 @@ app.post("/api/b2b/services", async (req, res) => {
     }
 
     
-    const initialStatus = "Chờ duyệt";
+    const dtTruoc = DoanhThuTruocChietKhau ? parseInt(DoanhThuTruocChietKhau) : 0;
+    const viTien = Vi ? parseInt(Vi) : 0;
+
+    const dtSau = dtTruoc - viTien; 
 
     const { data, error } = await supabase
       .from("B2B_SERVICES")
@@ -1919,16 +1924,16 @@ app.post("/api/b2b/services", async (req, res) => {
         GhiChu: GhiChu || "",
         NguoiPhuTrachId: NguoiPhuTrachId || null, 
         
-      
         InvoiceUrl: InvoiceUrl || "",                 
         YeuCauHoaDon: YeuCauHoaDon || "No",       
         GoiDichVu: GoiDichVu || "Thông thường",     
   
-        
-        DoanhThuTruocChietKhau: 0,
+       
+        DoanhThuTruocChietKhau: dtTruoc, 
         SoTienChietKhau: 0,
-        DoanhThuSauChietKhau: 0,
-        Vi: 0,
+        DoanhThuSauChietKhau: dtSau, 
+        Vi: viTien,
+        
         CreatedAt: new Date().toISOString()
       }])
       .select()
