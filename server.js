@@ -427,7 +427,7 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
    
     const { 
       userId, 
-
+      NguoiPhuTrachId,
       HoTen, SoDienThoai, Email, MaVung,
       LoaiDichVu, TenDichVu, GoiDichVu,
       TenHinhThuc, CoSoTuVan,
@@ -474,7 +474,7 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
      
         MaHoSo: newServiceCode,
        
-        NguoiPhuTrachId: userId, 
+        NguoiPhuTrachId: NguoiPhuTrachId || userId, 
         
       
         DoanhThuTruocChietKhau: dtTruoc,
