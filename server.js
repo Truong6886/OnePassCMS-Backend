@@ -2526,29 +2526,55 @@ app.put("/api/yeucau/:id", async (req, res) => {
   }
 });
 
+// [MỚI] API Lấy danh sách doanh nghiệp bị từ chối (B2B_REJECTED)
+app.get("/api/b2b/reject", async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
 
+    // Lấy dữ liệu từ bảng B2B_REJECTED
+    const { data, count, error } = await supabase
+      .from("B2B_REJECTED")
+      .select("*", { count: "exact" })
+      .order("ID", { ascending: false }) // Sắp xếp mới nhất lên đầu
+      .range(from, to);
+
+    if (error) throw error;
+
+    res.json({ 
+      success: true, 
+      data, 
+      total: count, 
+      page, 
+      totalPages: Math.ceil(count / limit) 
+    });
+  } catch (err) {
+    console.error("❌ Lỗi lấy danh sách B2B_REJECTED:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 app.get("/api/yeucau", async (req, res) => {
   try {
-    // 1. Lấy thêm các tham số role từ req.query
-    const { 
+
+   const { 
       userId, 
       is_admin, 
-      is_staff,       // Thêm is_staff
-      is_director,    // Thêm is_director
-      is_accountant,  // Thêm is_accountant
+      is_staff,       
+      is_director,    
+      is_accountant,  
       page = 1, 
       limit = 20 
     } = req.query;
 
     console.log("📥 Fetching YeuCau | userId:", userId, "Roles:", { is_admin, is_staff });
 
-    // 2. Hàm helper để kiểm tra giá trị boolean (vì query param gửi lên là chuỗi "true")
     const hasRole = (val) => val === true || val === "true";
 
-    // 3. Xác định xem người dùng có quyền xem "Tổng quan" (Tất cả) hay không
+  
     const canViewAll = 
       hasRole(is_admin) || 
-      hasRole(is_staff) || 
       hasRole(is_director) || 
       hasRole(is_accountant);
 
