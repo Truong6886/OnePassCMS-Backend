@@ -2704,6 +2704,8 @@ app.get("/api/yeucau", async (req, res) => {
 });
 // Thêm vào server.js
 
+// ... trong file server.js
+
 app.post("/api/verify-password", async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -2720,16 +2722,19 @@ app.post("/api/verify-password", async (req, res) => {
       .maybeSingle();
 
     if (error || !data) {
-      return res.status(404).json({ success: false, message: "User không tồn tại" });
+      // User không tồn tại -> Trả về 200 kèm success: false để tránh lỗi auth 401
+      return res.json({ success: false, message: "User không tồn tại" });
     }
 
     // 2. So sánh mật khẩu
     const match = await bcrypt.compare(password, data.password_hash);
     if (!match) {
-      return res.status(401).json({ success: false, message: "Mật khẩu không chính xác" });
+      // [SỬA QUAN TRỌNG]: Đổi từ status(401) thành status(200) hoặc status(400)
+      // Để tránh authenticatedFetch ở frontend bắt nhầm thành lỗi hết phiên
+      return res.json({ success: false, message: "Mật khẩu không chính xác" });
     }
 
-    // 3. Trả về thành công mà KHÔNG cập nhật session_token
+    // 3. Trả về thành công
     res.json({ success: true, message: "Xác thực thành công" });
 
   } catch (err) {
