@@ -2555,15 +2555,13 @@ app.get("/api/b2b/reject", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-// ... (Các đoạn code cũ)
 
-// ================= VENDOR API =================
 
-// 1. Lấy danh sách Vendor
 app.get("/api/vendors", async (req, res) => {
   try {
+    
     const { data, error } = await supabase
-      .from("Vendors")
+      .from("Vendor") 
       .select("*")
       .order("created_at", { ascending: false });
 
@@ -2575,17 +2573,29 @@ app.get("/api/vendors", async (req, res) => {
   }
 });
 
-// 2. Thêm Vendor mới
+
 app.post("/api/vendors", async (req, res) => {
   try {
-    const { name, business_license_id, address, contact_person, area_code, phone, email, services, notes } = req.body;
+ 
+    const { 
+      TenVendor, SoDKKD, DiaChi, DauMoi, 
+      MaVung, SoDienThoai, Email, Service, GhiChu 
+    } = req.body;
 
-    if (!name) return res.status(400).json({ success: false, message: "Tên Vendor là bắt buộc" });
+    if (!TenVendor) return res.status(400).json({ success: false, message: "Tên Vendor là bắt buộc" });
 
     const { data, error } = await supabase
-      .from("Vendors")
+      .from("Vendor")
       .insert([{
-        name, business_license_id, address, contact_person, area_code, phone, email, services, notes
+        TenVendor, 
+        SoDKKD, 
+        DiaChi, 
+        DauMoi, 
+        MaVung, 
+        SoDienThoai, 
+        Email, 
+        Service, 
+        GhiChu
       }])
       .select()
       .single();
@@ -2597,15 +2607,28 @@ app.post("/api/vendors", async (req, res) => {
   }
 });
 
-// 3. Cập nhật Vendor
+
 app.put("/api/vendors/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const updateData = req.body;
+    const { 
+      TenVendor, SoDKKD, DiaChi, DauMoi, 
+      MaVung, SoDienThoai, Email, Service, GhiChu 
+    } = req.body;
 
     const { data, error } = await supabase
-      .from("Vendors")
-      .update(updateData)
+      .from("Vendor")
+      .update({
+        TenVendor, 
+        SoDKKD, 
+        DiaChi, 
+        DauMoi, 
+        MaVung, 
+        SoDienThoai, 
+        Email, 
+        Service, 
+        GhiChu
+      })
       .eq("id", id)
       .select()
       .single();
@@ -2621,7 +2644,8 @@ app.put("/api/vendors/:id", async (req, res) => {
 app.delete("/api/vendors/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { error } = await supabase.from("Vendors").delete().eq("id", id);
+    // Sửa tên bảng thành Vendor
+    const { error } = await supabase.from("Vendor").delete().eq("id", id);
     if (error) throw error;
     res.json({ success: true, message: "Đã xóa vendor" });
   } catch (err) {
