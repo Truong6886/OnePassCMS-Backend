@@ -105,7 +105,7 @@ const SERVICE_MAPPING = {
 };
 
 
-function getInitials(str) {
+function getInitialsService(str) {
   if (!str) return "OT";
   return str
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '') 
@@ -124,7 +124,7 @@ async function generateServiceCode(supabase, loaiDichVu, yeuCauHoaDon, danhMuc) 
 
   if (!prefix) {
      const cleanLoai = loaiDichVu ? loaiDichVu.trim() : "";
-     prefix = getInitials(cleanLoai); 
+     prefix =  getInitialsService(cleanLoai); 
   }
 
 
@@ -1845,10 +1845,7 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
     });
   }
 });
-// Lấy danh sách dịch vụ
-// ... (Các import và setup giữ nguyên)
 
-// [CẬP NHẬT] Lấy danh sách dịch vụ kèm Số ĐKKD và Người phụ trách
 app.get("/api/b2b/services", async (req, res) => {
   try {
     const { page, limit, DoanhNghiepID } = req.query;
@@ -1942,7 +1939,7 @@ app.post("/api/b2b/services", async (req, res) => {
   try {
   
     const { 
-      DoanhNghiepID, LoaiDichVu, TenDichVu, NgayThucHien,
+      DoanhNghiepID, LoaiDichVu, DanhMuc,TenDichVu, NgayThucHien,
       NgayHoanThanh, YeuCauHoaDon, InvoiceUrl, 
       GhiChu, NguoiPhuTrachId, GoiDichVu,
       DoanhThuTruocChietKhau, Vi  
@@ -1963,6 +1960,7 @@ app.post("/api/b2b/services", async (req, res) => {
       .insert([{
         DoanhNghiepID,
         LoaiDichVu,
+        DanhMuc: DanhMuc || "",
         TenDichVu: TenDichVu || "",
         ServiceID: null, 
         NgayThucHien,
@@ -2001,7 +1999,7 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
 
     const { 
         LoaiDichVu, 
-        DanhMuc, // <--- ĐÃ THÊM: Lấy DanhMuc từ request body
+        DanhMuc, 
         TenDichVu, 
         NgayThucHien, 
         NgayHoanThanh,
