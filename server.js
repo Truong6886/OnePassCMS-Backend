@@ -50,40 +50,82 @@ function translateBranchName(name) {
     };
     return map[name?.trim()] || name?.trim() || "";
 }
-async function generateServiceCode(supabase, loaiDichVu, yeuCauHoaDon) {
-  // Map mã dịch vụ theo yêu cầu
-  const typeMap = {
-    "Chứng thực": "CT",
-    "Kết hôn": "KH",
-    "Khai sinh": "KS",
-    "Khai tử": "KT",
-    "Xuất nhập cảnh": "XNC",
-    "Giấy tờ tuỳ thân": "GT",
-    "Nhận nuôi": "NN",
-    "Thị thực": "TT",
-    "Tư vấn pháp lý": "TV",
-    "Dịch vụ B2B": "B2B",
-   
-  };
-  
-  let prefix = "";
-  const cleanLoaiDichVu = loaiDichVu ? loaiDichVu.trim() : "";
-  
 
-  for (const [key, value] of Object.entries(typeMap)) {
-    if (cleanLoaiDichVu.toLowerCase().includes(key.toLowerCase())) {
-      prefix = value;
-      break;
-    }
+const SERVICE_MAPPING = {
+  "Hộ chiếu, Hộ tịch": {
+    "Hộ chiếu cấp mới (Hợp pháp - Trẻ em)": "HCCM",
+    "Hộ chiếu cấp đổi (Hợp pháp - Còn hạn)": "HCCL A1",
+    "Hộ chiếu cấp đổi (Hợp pháp - Hết hạn)": "HCCL A2",
+    "Hộ chiếu cấp đổi (Bất hợp pháp - Còn hạn)": "HCCL B1",
+    "Hộ chiếu cấp đổi (Bất hợp pháp - Hết hạn)": "HCCL B2",
+    "Hộ chiếu cấp đổi rút gọn (công tác ngắn hạn, du lịch, trục xuất)": "HCRG",
+    "Hộ chiếu bị chú": "BCHC",
+    "Dán ảnh trẻ em": "DCDA",
+    "Cải chính hộ tịch": "CCHT",
+    "Trích lục khai sinh (sao)": "TLKS",
+    "Ghi chú kết hôn (Ghi vào sổ hộ tịch việc kết hôn)": "GCKH",
+    "Ghi chú ly hôn": "GCLH",
+    "Ghi chú khai sinh": "GCKS"
+  },
+  "Quốc tịch": {
+    "Thôi quốc tịch Việt Nam": "TQT",
+    "Giấy xác nhận có quốc tịch Việt Nam": "XNQT",
+    "Cấp giấy xác nhận người gốc Việt": "XNQT"
+  },
+  "Nhận nuôi": {
+    "Đăng ký việc nuôi con nuôi": "NCN",
+    "Đăng ký việc nhận cha, mẹ, con": "CNC"
+  },
+  "Thị thực": {
+    "Giấy miễn thị thực": "MTT"
+  },
+  "Khai sinh, khai tử": {
+    "Đăng ký khai sinh": "KS"
+  },
+  "Kết hôn": {
+    "Đăng ký kết hôn Việt - Việt": "KHV-V",
+    "Giấy xác nhận tình trạng hôn nhân": "TTHN",
+    "Giấy chứng nhận đủ điều kiện kết hôn Việt - Hàn": "KHV-H"
+  },
+  "Chứng thực": {
+    "Hợp pháp hoá lãnh sự/Chứng nhận lãnh sự": "HPH",
+    "Công chứng, chứng thực hợp đồng giao dịch": "CCHD",
+    "Hợp đồng ủy quyền": "HDUQ",
+    "Ủy quyền": "UQ",
+    "Ủy quyền đưa con về nước": "UQĐTE",
+    "Chứng thực chữ ký": "CTCK",
+    "Sao y bản chính": "SYBC"
+  },
+  "Khác": {
+    "Xác minh": "XM",
+    "Dịch Việt - Hàn": "DTVH",
+    "Dịch Hàn - Việt": "DTHV",
+    "Dịch BLX": "DTBLX"
+  }
+};
+
+
+function getInitials(str) {
+  if (!str) return "OT";
+  return str
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') 
+    .replace(/đ/g, 'd').replace(/Đ/g, 'D')
+    .match(/[A-Z0-9]/gi) // Lấy chữ cái và số
+    ?.join('').toUpperCase().slice(0, 4) || "OT";
+}
+
+async function generateServiceCode(supabase, loaiDichVu, yeuCauHoaDon, danhMuc) {
+  let prefix = "";
+
+  if (loaiDichVu && danhMuc && SERVICE_MAPPING[loaiDichVu] && SERVICE_MAPPING[loaiDichVu][danhMuc]) {
+    prefix = SERVICE_MAPPING[loaiDichVu][danhMuc];
   }
 
 
   if (!prefix) {
-    prefix = getInitials(cleanLoaiDichVu);
+     const cleanLoai = loaiDichVu ? loaiDichVu.trim() : "";
+     prefix = getInitials(cleanLoai); 
   }
-
-
-  if (!prefix) prefix = "OT";
 
 
   const now = new Date();
@@ -92,27 +134,31 @@ async function generateServiceCode(supabase, loaiDichVu, yeuCauHoaDon) {
   const dd = String(now.getDate()).padStart(2, '0');
   const dateStr = `${yy}${mm}${dd}`; 
 
-  const isInvoice = ["yes", "có", "true"].includes(String(yeuCauHoaDon).toLowerCase());
+
+  const isInvoice = ["yes", "có", "true", "y"].includes(String(yeuCauHoaDon).toLowerCase());
   const invoiceCode = isInvoice ? "Y" : "N";
+
 
   const searchString = `${prefix}-${dateStr}-%`; 
 
-  const { data: lastRecord } = await supabase
+  const { data: lastRecord, error } = await supabase
     .from("B2B_SERVICES")
-    .select("ServiceID")
+    .select("ServiceID, CreatedAt") 
     .like("ServiceID", searchString)
-    .order("MaHoSo", { ascending: false })
+    .order("CreatedAt", { ascending: false })
     .limit(1)
     .maybeSingle();
 
   let nextSequence = 1;
-  if (lastRecord && lastRecord.MaHoSo) {
-    const parts = lastRecord.MaHoSo.split('-');
+  if (lastRecord && lastRecord.ServiceID) {
+    // Tách chuỗi để lấy số cuối cùng
+    const parts = lastRecord.ServiceID.split('-');
     const lastNum = parseInt(parts[parts.length - 1]);
     if (!isNaN(lastNum)) nextSequence = lastNum + 1;
   }
 
   const sequenceStr = String(nextSequence).padStart(3, "0");
+  
   return `${prefix}-${dateStr}-${invoiceCode}-${sequenceStr}`;
 }
 async function generateB2CServiceCode(supabase, loaiDichVu, yeuCauHoaDon) {
@@ -1949,16 +1995,25 @@ app.post("/api/b2b/services", async (req, res) => {
 });
 
 
-
 app.put("/api/b2b/services/update/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
     const { 
-        LoaiDichVu, TenDichVu, NgayThucHien, NgayHoanThanh,
-        DoanhThuTruocChietKhau, Vi, GhiChu,
-        YeuCauHoaDon, InvoiceUrl, GoiDichVu, 
-        NguoiPhuTrachId, approveAction, userId  
+        LoaiDichVu, 
+        DanhMuc, // <--- ĐÃ THÊM: Lấy DanhMuc từ request body
+        TenDichVu, 
+        NgayThucHien, 
+        NgayHoanThanh,
+        DoanhThuTruocChietKhau, 
+        Vi, 
+        GhiChu,
+        YeuCauHoaDon, 
+        InvoiceUrl, 
+        GoiDichVu, 
+        NguoiPhuTrachId, 
+        approveAction, 
+        userId  
     } = req.body;
 
     const { data: current } = await supabase
@@ -1970,22 +2025,23 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
     if (!current) return res.status(404).json({ success: false, message: "Không tìm thấy dịch vụ" });
     let finalMaDichVu = current.ServiceID;
 
-    // --- LOGIC DUYỆT ---
+  
     if (approveAction === "accountant_approve") {
+     
       if (userId) {
-       
+         // ... (Logic kiểm tra quyền giữ nguyên) ...
          const { data: userCheck } = await supabase
             .from("User")
             .select("is_director, perm_approve_b2b")
             .eq("id", userId)
             .single();
             
-         if (!userCheck || (!userCheck.is_director && !userCheck.perm_approve_b2b)) {
-             return res.status(403).json({ success: false, message: "Bạn không có quyền duyệt dịch vụ B2B (Cần quyền Giám đốc hoặc được phân quyền)." });
-         }
+          if (!userCheck || (!userCheck.is_director && !userCheck.perm_approve_b2b)) {
+              return res.status(403).json({ success: false, message: "Bạn không có quyền duyệt dịch vụ B2B (Cần quyền Giám đốc hoặc được phân quyền)." });
+          }
       }
-      
 
+  
       const { data: ds } = await supabase
         .from("B2B_SERVICES")
         .select("DoanhThuSauChietKhau")
@@ -2017,10 +2073,12 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
           .eq("ID", current.DoanhNghiepID);
       }
 
+      // CẤP MÃ DỊCH VỤ MỚI
       finalMaDichVu = await generateServiceCode(
         supabase,
         LoaiDichVu || current.LoaiDichVu,
-        YeuCauHoaDon || current.YeuCauHoaDon 
+        YeuCauHoaDon || current.YeuCauHoaDon,
+        DanhMuc || current.DanhMuc 
       );
 
       req.body.DoanhThuSauChietKhau = dtSau;
@@ -2033,8 +2091,9 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
     const { data, error } = await supabase
       .from("B2B_SERVICES")
       .update({
-        // ... giữ nguyên các trường ...
+        
         LoaiDichVu: LoaiDichVu || current.LoaiDichVu,
+        DanhMuc: DanhMuc || current.DanhMuc,
         TenDichVu: TenDichVu || current.TenDichVu,
         ServiceID: finalMaDichVu,
         NgayThucHien: NgayThucHien || current.NgayThucHien,
@@ -2047,7 +2106,7 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
         Vi: req.body.Vi ?? current.Vi,
         YeuCauHoaDon: YeuCauHoaDon || current.YeuCauHoaDon,
         InvoiceUrl: InvoiceUrl || current.InvoiceUrl,    
-        GoiDichVu: GoiDichVu || current.GoiDichVu,  
+        GoiDichVu: GoiDichVu || current.GoiDichVu,   
         GhiChu: GhiChu || current.GhiChu,
         NguoiPhuTrachId: NguoiPhuTrachId || current.NguoiPhuTrachId,
         UpdatedAt: new Date().toISOString()
