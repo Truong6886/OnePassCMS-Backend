@@ -30,8 +30,8 @@ function translateServiceName(name) {
       "인증 센터": "Chứng thực",
       "결혼 이민": "Kết hôn",
       "출생신고 대행": "Khai sinh, khai tử",
-      "국적": "Quốc tịch",
-      "여권 • 호적": "Hộ chiếu, Hộ tịch",
+      "국적 대행": "Quốc tịch",
+      "여권 • 호적 대행": "Hộ chiếu, Hộ tịch",
       "입양 절차 대행": "Nhận nuôi",
       "비자 대행": "Thị thực",
       "법률 컨설팅": "Tư vấn pháp lý",
@@ -180,11 +180,16 @@ async function generateB2CServiceCode(supabase, loaiDichVu, yeuCauHoaDon) {
   let cleanName = loaiDichVu ? loaiDichVu.trim() : "";
   
   const krToViMap = {
-      "인증 센터": "Chứng thực", "결혼 이민": "Kết hôn",
-      "출생신고 대행": "Khai sinh, khai tử", "출입국 행정 대행": "Xuất nhập cảnh",
-      "신분증명 서류 대행": "Giấy tờ tuỳ thân", "입양 절차 대행": "Nhận nuôi",
-      "비자 대행": "Thị thực", "법률 컨설팅": "Tư vấn pháp lý",
-      "B2B 서비스": "Dịch vụ B2B", "기타": "Khác",
+      "인증 센터": "Chứng thực",
+      "결혼 이민": "Kết hôn",
+      "출생신고 대행": "Khai sinh, khai tử",
+      "국적 대행": "Quốc tịch",
+      "여권 • 호적 대행": "Hộ chiếu, Hộ tịch",
+      "입양 절차 대행": "Nhận nuôi",
+      "비자 대행": "Thị thực",
+      "법률 컨설팅": "Tư vấn pháp lý",
+      "B2B 서비스": "Dịch vụ B2B",
+      "기타": "Khác",
   };
   if (krToViMap[cleanName]) cleanName = krToViMap[cleanName];
 
@@ -1722,14 +1727,14 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
 
     const approvedId = approvedData.ID;
 
-    // 3. Chèn dịch vụ vào bảng con B2B_APPROVED_SERVICES
-    if (dichVuNames) {
-      const servicesArray = dichVuNames.split(",").map(dv => dv.trim());
+   
+   if (dichVuNames) {
       
-      const servicesToInsert = servicesArray.map(serviceName => ({
+      const servicesToInsert = [{
         DoanhNghiepID: approvedId,
-        TenDichVu: serviceName,
-      }));
+        TenDichVu: dichVuNames,
+      }];
+      // ----------------------------------
 
       const { error: servicesError } = await supabase
         .from("B2B_APPROVED_SERVICES")
@@ -1737,7 +1742,6 @@ app.post("/api/b2b/approve/:id", async (req, res) => {
 
       if (servicesError) throw servicesError;
     }
-
    
     try {
       const emailContent = `
