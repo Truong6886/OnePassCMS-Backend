@@ -30,8 +30,8 @@ function translateServiceName(name) {
       "인증 센터": "Chứng thực",
       "결혼 이민": "Kết hôn",
       "출생신고 대행": "Khai sinh, khai tử",
-      "출입국 행정 대행": "Xuất nhập cảnh",
-      "신분증명 서류 대행": "Giấy tờ tuỳ thân",
+      "국적": "Quốc tịch",
+      "여권 • 호적": "Hộ chiếu, Hộ tịch",
       "입양 절차 대행": "Nhận nuôi",
       "비자 대행": "Thị thực",
       "법률 컨설팅": "Tư vấn pháp lý",
@@ -114,19 +114,21 @@ function getInitialsService(str) {
     ?.join('').toUpperCase().slice(0, 4) || "OT";
 }
 
+
+
+
 async function generateServiceCode(supabase, loaiDichVu, yeuCauHoaDon, danhMuc) {
   let prefix = "";
+  const mainCategory = danhMuc ? danhMuc.split(" + ")[0].trim() : "";
 
-  if (loaiDichVu && danhMuc && SERVICE_MAPPING[loaiDichVu] && SERVICE_MAPPING[loaiDichVu][danhMuc]) {
-    prefix = SERVICE_MAPPING[loaiDichVu][danhMuc];
+  if (loaiDichVu && mainCategory && SERVICE_MAPPING[loaiDichVu] && SERVICE_MAPPING[loaiDichVu][mainCategory]) {
+    prefix = SERVICE_MAPPING[loaiDichVu][mainCategory];
   }
-
 
   if (!prefix) {
      const cleanLoai = loaiDichVu ? loaiDichVu.trim() : "";
      prefix =  getInitialsService(cleanLoai); 
   }
-
 
   const now = new Date();
   const yy = now.getFullYear().toString().slice(-2);
@@ -134,10 +136,8 @@ async function generateServiceCode(supabase, loaiDichVu, yeuCauHoaDon, danhMuc) 
   const dd = String(now.getDate()).padStart(2, '0');
   const dateStr = `${yy}${mm}${dd}`; 
 
-
   const isInvoice = ["yes", "có", "true", "y"].includes(String(yeuCauHoaDon).toLowerCase());
   const invoiceCode = isInvoice ? "Y" : "N";
-
 
   const searchString = `${prefix}-${dateStr}-%`; 
 
@@ -151,7 +151,6 @@ async function generateServiceCode(supabase, loaiDichVu, yeuCauHoaDon, danhMuc) 
 
   let nextSequence = 1;
   if (lastRecord && lastRecord.ServiceID) {
-    // Tách chuỗi để lấy số cuối cùng
     const parts = lastRecord.ServiceID.split('-');
     const lastNum = parseInt(parts[parts.length - 1]);
     if (!isNaN(lastNum)) nextSequence = lastNum + 1;
@@ -2846,15 +2845,15 @@ app.post("/api/tuvan", async (req, res) => {
 
     console.log("Nhận yêu cầu tư vấn từ khách hàng:", req.body);
 
-    if (!TenDichVu || !HoTen || !MaVung || !SoDienThoai) {
+    if (!LoaiDichVu || !HoTen || !MaVung || !SoDienThoai) {
       return res.status(400).json({ success: false, message: "Thiếu dữ liệu bắt buộc" });
     }
-    const viTenDichVu = translateServiceName(TenDichVu); 
-    const viLoaiDichVu = translateServiceName(LoaiDichVu || TenDichVu);
+    
+    const viLoaiDichVu = translateServiceName(LoaiDichVu);
     const viCoSo = translateBranchName(CoSoTuVan);
 
     let insertData = {
-      TenDichVu: viTenDichVu,
+      TenDichVu,
       CoSoTuVan: viCoSo || null,
       TenHinhThuc,
       HoTen,
