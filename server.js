@@ -1942,23 +1942,24 @@ app.get("/api/b2b/services/wallet", async (req, res) => {
 
 app.post("/api/b2b/services", async (req, res) => {
   try {
-  
     const { 
-      DoanhNghiepID, LoaiDichVu, DanhMuc,TenDichVu, NgayThucHien,
+      DoanhNghiepID, LoaiDichVu, DanhMuc, TenDichVu, NgayThucHien,
       NgayHoanThanh, YeuCauHoaDon, InvoiceUrl, 
       GhiChu, NguoiPhuTrachId, GoiDichVu,
-      DoanhThuTruocChietKhau, Vi  
+      DoanhThuTruocChietKhau, Vi, MucChietKhau 
     } = req.body;
 
     if (!DoanhNghiepID || !LoaiDichVu) {
       return res.status(400).json({ success: false, message: "Thiếu dữ liệu bắt buộc" });
     }
 
-    
     const dtTruoc = DoanhThuTruocChietKhau ? parseInt(DoanhThuTruocChietKhau) : 0;
     const viTien = Vi ? parseInt(Vi) : 0;
+    const phanTramCK = MucChietKhau ? parseFloat(MucChietKhau) : 0;
 
-    const dtSau = dtTruoc - viTien; 
+
+    const tienCK = Math.round((dtTruoc * phanTramCK) / 100);
+    const dtSau = dtTruoc - tienCK - viTien;
 
     const { data, error } = await supabase
       .from("B2B_SERVICES")
@@ -1972,14 +1973,14 @@ app.post("/api/b2b/services", async (req, res) => {
         NgayHoanThanh: NgayHoanThanh || null, 
         GhiChu: GhiChu || "",
         NguoiPhuTrachId: NguoiPhuTrachId || null, 
-        
         InvoiceUrl: InvoiceUrl || "",                 
         YeuCauHoaDon: YeuCauHoaDon || "No",       
         GoiDichVu: GoiDichVu || "Thông thường",     
   
-       
+        // Lưu tài chính
         DoanhThuTruocChietKhau: dtTruoc, 
-        SoTienChietKhau: 0,
+        MucChietKhau: phanTramCK,
+        SoTienChietKhau: tienCK,
         DoanhThuSauChietKhau: dtSau, 
         Vi: viTien,
         
@@ -1996,7 +1997,6 @@ app.post("/api/b2b/services", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-
 
 app.put("/api/b2b/services/update/:id", async (req, res) => {
   try {
@@ -2019,6 +2019,7 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
         userId  
     } = req.body;
 
+    // Lấy thông tin hiện tại
     const { data: current } = await supabase
       .from("B2B_SERVICES")
       .select("*")
@@ -2026,13 +2027,14 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
       .single();
 
     if (!current) return res.status(404).json({ success: false, message: "Không tìm thấy dịch vụ" });
+    
     let finalMaDichVu = current.ServiceID;
 
-  
+   
     if (approveAction === "accountant_approve") {
-     
+      
+    
       if (userId) {
-         // ... (Logic kiểm tra quyền giữ nguyên) ...
          const { data: userCheck } = await supabase
             .from("User")
             .select("is_director, perm_approve_b2b")
@@ -2040,24 +2042,35 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
             .single();
             
           if (!userCheck || (!userCheck.is_director && !userCheck.perm_approve_b2b)) {
-              return res.status(403).json({ success: false, message: "Bạn không có quyền duyệt dịch vụ B2B (Cần quyền Giám đốc hoặc được phân quyền)." });
+              return res.status(403).json({ success: false, message: "Bạn không có quyền duyệt dịch vụ B2B." });
           }
       }
 
-  
-      const { data: ds } = await supabase
-        .from("B2B_SERVICES")
-        .select("DoanhThuSauChietKhau")
-        .eq("DoanhNghiepID", current.DoanhNghiepID);
+ 
+      const dtInput = DoanhThuTruocChietKhau ? parseInt(DoanhThuTruocChietKhau) : 0;
+      const viMoi = Vi ? parseInt(Vi) : 0; 
 
-      const totalCurrent = ds?.reduce((sum, i) => sum + (i.DoanhThuSauChietKhau || 0), 0) ?? 0;
-      const { chietKhau } = tinhHangVaChietKhau(totalCurrent); 
+    
+      let chietKhauFinal = 0;
 
-      const dtInput = DoanhThuTruocChietKhau || 0;
-      const soCK = Math.round((dtInput * chietKhau) / 100);
-      const dtSau = dtInput - soCK;
+      if (req.body.MucChietKhau !== undefined && req.body.MucChietKhau !== "") {
+          chietKhauFinal = parseFloat(req.body.MucChietKhau);
+      } else {
 
-      // Trừ ví
+          const { data: ds } = await supabase
+             .from("B2B_SERVICES")
+             .select("DoanhThuSauChietKhau")
+             .eq("DoanhNghiepID", current.DoanhNghiepID);
+
+          const totalCurrent = ds?.reduce((sum, i) => sum + (i.DoanhThuSauChietKhau || 0), 0) ?? 0;
+          const { chietKhau } = tinhHangVaChietKhau(totalCurrent); 
+          chietKhauFinal = chietKhau;
+      }
+
+    
+      const soCK = Math.round((dtInput * chietKhauFinal) / 100);
+      const dtSau = dtInput - soCK - viMoi;
+
       const { data: approved } = await supabase
         .from("B2B_APPROVED")
         .select("SoDuVi")
@@ -2065,10 +2078,10 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
         .maybeSingle();
 
       const soDu = approved?.SoDuVi ?? 0;
-      const viMoi = Vi || 0;
 
-      if (soDu < viMoi)
-        return res.status(400).json({ success: false, message: "Ví không đủ" });
+      if (soDu < viMoi) {
+        return res.status(400).json({ success: false, message: `Số dư ví không đủ (Hiện có: ${soDu})` });
+      }
 
       if (viMoi > 0) {
         await supabase.from("B2B_APPROVED")
@@ -2076,7 +2089,7 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
           .eq("ID", current.DoanhNghiepID);
       }
 
-      // CẤP MÃ DỊCH VỤ MỚI
+   
       finalMaDichVu = await generateServiceCode(
         supabase,
         LoaiDichVu || current.LoaiDichVu,
@@ -2084,29 +2097,38 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
         DanhMuc || current.DanhMuc 
       );
 
+      
       req.body.DoanhThuSauChietKhau = dtSau;
       req.body.SoTienChietKhau = soCK;
-      req.body.MucChietKhau = chietKhau;
-      req.body.TongDoanhThuTichLuy = totalCurrent + dtSau;
+      req.body.MucChietKhau = chietKhauFinal;
+
+      const { data: dsMoi } = await supabase
+             .from("B2B_SERVICES")
+             .select("DoanhThuSauChietKhau")
+             .eq("DoanhNghiepID", current.DoanhNghiepID);
+      const totalCurrentMoi = dsMoi?.reduce((sum, i) => sum + (i.DoanhThuSauChietKhau || 0), 0) ?? 0;
+      req.body.TongDoanhThuTichLuy = totalCurrentMoi + dtSau;
     }
 
-  
+    // --- CẬP NHẬT DB ---
     const { data, error } = await supabase
       .from("B2B_SERVICES")
       .update({
-        
         LoaiDichVu: LoaiDichVu || current.LoaiDichVu,
         DanhMuc: DanhMuc || current.DanhMuc,
         TenDichVu: TenDichVu || current.TenDichVu,
         ServiceID: finalMaDichVu,
         NgayThucHien: NgayThucHien || current.NgayThucHien,
         NgayHoanThanh: NgayHoanThanh || current.NgayHoanThanh,
+        
+        // Cập nhật các trường tài chính (dùng ?? để giữ nguyên nếu không có thay đổi)
         DoanhThuTruocChietKhau: req.body.DoanhThuTruocChietKhau ?? current.DoanhThuTruocChietKhau,
         DoanhThuSauChietKhau: req.body.DoanhThuSauChietKhau ?? current.DoanhThuSauChietKhau,
         SoTienChietKhau: req.body.SoTienChietKhau ?? current.SoTienChietKhau,
         MucChietKhau: req.body.MucChietKhau ?? current.MucChietKhau,
         TongDoanhThuTichLuy: req.body.TongDoanhThuTichLuy ?? current.TongDoanhThuTichLuy,
         Vi: req.body.Vi ?? current.Vi,
+
         YeuCauHoaDon: YeuCauHoaDon || current.YeuCauHoaDon,
         InvoiceUrl: InvoiceUrl || current.InvoiceUrl,    
         GoiDichVu: GoiDichVu || current.GoiDichVu,   
