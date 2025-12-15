@@ -483,7 +483,7 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
             supabase, 
             LoaiDichVu || currentReq.LoaiDichVu, 
             currentReq.Invoice,
-            DanhMuc || currentReq.DanhMuc // <--- THÊM CÁI NÀY
+            DanhMuc || currentReq.DanhMuc 
          );
     }
 
@@ -3052,58 +3052,100 @@ app.post("/api/tuvan", async (req, res) => {
 
 app.post("/api/yeucau", async (req, res) => {
   try {
-    let newRequestData = { ...req.body };
 
-    console.log("[CMS] Admin đang thêm yêu cầu mới:", newRequestData);
+    const { 
+        autoApprove, 
+        currentUserId, 
+        ConfirmPassword,
+        DoanhThuTruocChietKhau, 
+        MucChietKhau, 
+        ...restData 
+    } = req.body;
 
-    // ✅ Làm sạch dữ liệu
+    let newRequestData = { ...restData };
+
+
+    delete newRequestData.Vi;
+
+    console.log("[CMS] Tạo yêu cầu mới. AutoApprove:", autoApprove);
+
+
     for (const key of Object.keys(newRequestData)) {
-      if (
-        newRequestData[key] === "" ||
-        newRequestData[key] === undefined ||
-        (typeof newRequestData[key] === "string" && newRequestData[key].trim() === "")
-      ) {
+      if (newRequestData[key] === "" || newRequestData[key] === undefined) {
         newRequestData[key] = null;
       }
     }
+    
+    
+    if (newRequestData.NguoiPhuTrachId) {
+      newRequestData.NguoiPhuTrachId = parseInt(newRequestData.NguoiPhuTrachId, 10) || null;
+    }
+ 
+    if (!newRequestData.NgayTao) newRequestData.NgayTao = new Date().toISOString();
 
-    // ✅ Ép kiểu integer
-    if (newRequestData.NguoiPhuTrachId !== null) {
-      const parsed = parseInt(newRequestData.NguoiPhuTrachId, 10);
-      newRequestData.NguoiPhuTrachId = isNaN(parsed) ? null : parsed;
+   
+    if (autoApprove === true || autoApprove === "true") {
+        // a. Tính toán tài chính
+        const dtTruoc = parseInt(DoanhThuTruocChietKhau) || 0;
+        const phanTram = parseFloat(MucChietKhau) || 0;
+        
+   
+        const tienChietKhau = Math.round((dtTruoc * phanTram) / 100);
+        
+     
+        const dtSau = dtTruoc - tienChietKhau; 
+
+  
+        const newCode = await generateB2CServiceCode(
+            supabase, 
+            newRequestData.LoaiDichVu, 
+            newRequestData.Invoice || newRequestData.YeuCauHoaDon, 
+            newRequestData.DanhMuc
+        );
+
+     
+        newRequestData.MaHoSo = newCode;
+        newRequestData.DoanhThuTruocChietKhau = dtTruoc;
+        newRequestData.MucChietKhau = phanTram;
+        newRequestData.SoTienChietKhau = tienChietKhau;
+        newRequestData.DoanhThuSauChietKhau = dtSau;
+        
+     
+        if (!newRequestData.NguoiPhuTrachId && currentUserId) {
+            newRequestData.NguoiPhuTrachId = parseInt(currentUserId);
+        }
+    } else {
+
+        newRequestData.DoanhThuTruocChietKhau = 0;
+        newRequestData.DoanhThuSauChietKhau = 0;
+        newRequestData.SoTienChietKhau = 0;
+        newRequestData.MucChietKhau = 0;
     }
 
-    // ✅ Ngày tạo hợp lệ
-    if (newRequestData.NgayTao && isNaN(Date.parse(newRequestData.NgayTao))) {
-      newRequestData.NgayTao = new Date().toISOString();
-    }
-
+    // 4. Insert vào DB
     const { data, error } = await supabase
       .from("YeuCau")
       .insert([newRequestData])
-      .select();
+      .select()
+      .single();
 
     if (error) throw error;
 
-    const newRequest = data[0];
-    console.log("✅ [CMS] Yêu cầu mới được tạo:", newRequest);
-
-
+    console.log("✅ [CMS] Yêu cầu tạo thành công:", data.MaHoSo ? `Mã: ${data.MaHoSo}` : "Chưa cấp mã");
 
     res.json({
       success: true,
-      data: newRequest,
-      message: "Thêm yêu cầu thành công",
+      data: data,
+      message: (autoApprove === true || autoApprove === "true") 
+        ? `Đăng ký & Cấp mã thành công: ${data.MaHoSo}` 
+        : "Đăng ký dịch vụ mới thành công",
     });
+
   } catch (err) {
     console.error("❌ [CMS] Lỗi khi thêm yêu cầu:", err);
-    res.status(500).json({
-      success: false,
-      message: "Lỗi khi thêm yêu cầu: " + err.message,
-    });
+    res.status(500).json({ success: false, message: "Lỗi Server: " + err.message });
   }
 });
-// ====================== DOANH THU ======================
 app.get("/api/doanhthu", async (req, res) => {
   try {
     const { userId } = req.query;
