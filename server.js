@@ -482,7 +482,7 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
       LoaiDichVu, TenDichVu, GoiDichVu,
       TenHinhThuc, CoSoTuVan,
       ChonNgay, Gio, NoiDung, GhiChu,
-      // Các trường tài chính
+      DanhMuc,
       DoanhThuTruocChietKhau, MucChietKhau, Vi 
     } = req.body; 
 
@@ -521,7 +521,7 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
         TenHinhThuc, CoSoTuVan,
         ChonNgay, Gio, NoiDung, GhiChu,
 
-     
+        DanhMuc: DanhMuc,
         MaHoSo: newServiceCode,
        
         NguoiPhuTrachId: NguoiPhuTrachId || userId, 
