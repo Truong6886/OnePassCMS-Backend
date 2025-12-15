@@ -160,86 +160,57 @@ async function generateServiceCode(supabase, loaiDichVu, yeuCauHoaDon, danhMuc) 
   
   return `${prefix}-${dateStr}-${invoiceCode}-${sequenceStr}`;
 }
-async function generateB2CServiceCode(supabase, loaiDichVu, yeuCauHoaDon) {
 
-  const typeMap = {
-    "Chứng thực": "CT",
-    "Kết hôn": "KH",
-    "Khai sinh": "KS",
-    "Khai tử": "KT", 
-    "Xuất nhập cảnh": "XNC",
-    "Giấy tờ tuỳ thân": "GT",
-    "Nhận nuôi": "NN",
-    "Thị thực": "TT",
-    "Tư vấn pháp lý": "TV",
-    "Dịch vụ B2B": "B2B",
+
+async function generateB2CServiceCode(supabase, loaiDichVu, yeuCauHoaDon, danhMuc) {
+  let prefix = "";
   
-  };
 
+  const mainCategory = danhMuc ? danhMuc.split(" + ")[0].trim() : "";
 
-  let cleanName = loaiDichVu ? loaiDichVu.trim() : "";
   
-  const krToViMap = {
-      "인증 센터": "Chứng thực",
-      "결혼 이민": "Kết hôn",
-      "출생신고 대행": "Khai sinh, khai tử",
-      "국적 대행": "Quốc tịch",
-      "여권 • 호적 대행": "Hộ chiếu, Hộ tịch",
-      "입양 절차 대행": "Nhận nuôi",
-      "비자 대행": "Thị thực",
-      "법률 컨설팅": "Tư vấn pháp lý",
-      "B2B 서비스": "Dịch vụ B2B",
-      "기타": "Khác",
-  };
-  if (krToViMap[cleanName]) cleanName = krToViMap[cleanName];
-
-  // Tìm prefix
-  let prefix = ""; 
-  for (const [key, value] of Object.entries(typeMap)) {
-    if (cleanName.toLowerCase().includes(key.toLowerCase())) {
-      prefix = value;
-      break;
-    }
+  if (loaiDichVu && mainCategory && SERVICE_MAPPING[loaiDichVu] && SERVICE_MAPPING[loaiDichVu][mainCategory]) {
+    prefix = SERVICE_MAPPING[loaiDichVu][mainCategory];
   }
 
-  // [LOGIC MỚI] Nếu không thuộc danh sách trên -> Lấy chữ cái đầu
   if (!prefix) {
-     prefix = getInitials(cleanName);
+     const cleanLoai = loaiDichVu ? loaiDichVu.trim() : "";
+     prefix = getInitialsService(cleanLoai); 
   }
 
-  // Fallback cuối cùng
   if (!prefix) prefix = "OT";
 
-  // 2. Ngày tháng (YYMMDD)
+
   const now = new Date();
   const yy = now.getFullYear().toString().slice(-2);
   const mm = String(now.getMonth() + 1).padStart(2, '0');
   const dd = String(now.getDate()).padStart(2, '0');
-  const dateStr = `${yy}${mm}${dd}`;
+  const dateStr = `${yy}${mm}${dd}`; 
 
-  // 3. Invoice (Y/N)
   const isInvoice = ["yes", "có", "true", "y"].includes(String(yeuCauHoaDon).toLowerCase());
   const invoiceCode = isInvoice ? "Y" : "N";
 
-  // 4. Tìm số thứ tự
-  const searchString = `${prefix}-${dateStr}-%`;
+
+  const searchString = `${prefix}-${dateStr}-%`; 
 
   const { data: lastRecord } = await supabase
     .from("YeuCau")
     .select("MaHoSo")
     .like("MaHoSo", searchString)
-    .order("MaHoSo", { ascending: false })
+    .order("MaHoSo", { ascending: false }) 
     .limit(1)
     .maybeSingle();
 
   let nextSequence = 1;
   if (lastRecord && lastRecord.MaHoSo) {
+   
     const parts = lastRecord.MaHoSo.split('-');
     const lastNum = parseInt(parts[parts.length - 1]);
     if (!isNaN(lastNum)) nextSequence = lastNum + 1;
   }
 
   const sequenceStr = String(nextSequence).padStart(3, "0");
+  
 
   return `${prefix}-${dateStr}-${invoiceCode}-${sequenceStr}`;
 }
@@ -504,13 +475,17 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
     if (fetchError || !currentReq) return res.status(404).json({ success: false, message: "Không tìm thấy yêu cầu" });
 
   
-    let newServiceCode = currentReq.MaHoSo;
+   let newServiceCode = currentReq.MaHoSo;
 
     if (!newServiceCode || newServiceCode.length < 5) {
-
-         newServiceCode = await generateB2CServiceCode(supabase, LoaiDichVu || currentReq.LoaiDichVu, currentReq.Invoice);
+         
+         newServiceCode = await generateB2CServiceCode(
+            supabase, 
+            LoaiDichVu || currentReq.LoaiDichVu, 
+            currentReq.Invoice,
+            DanhMuc || currentReq.DanhMuc // <--- THÊM CÁI NÀY
+         );
     }
-
 
     const { data: updatedData, error: updateError } = await supabase
       .from("YeuCau")
