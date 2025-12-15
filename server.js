@@ -161,7 +161,7 @@ async function generateServiceCode(supabase, loaiDichVu, yeuCauHoaDon, danhMuc) 
   return `${prefix}-${dateStr}-${invoiceCode}-${sequenceStr}`;
 }
 async function generateB2CServiceCode(supabase, loaiDichVu, yeuCauHoaDon) {
-  // 1. Map ký tự viết tắt
+
   const typeMap = {
     "Chứng thực": "CT",
     "Kết hôn": "KH",
@@ -173,10 +173,10 @@ async function generateB2CServiceCode(supabase, loaiDichVu, yeuCauHoaDon) {
     "Thị thực": "TT",
     "Tư vấn pháp lý": "TV",
     "Dịch vụ B2B": "B2B",
-    // Bỏ "Khác"
+  
   };
 
-  // Chuẩn hóa tên dịch vụ
+
   let cleanName = loaiDichVu ? loaiDichVu.trim() : "";
   
   const krToViMap = {
