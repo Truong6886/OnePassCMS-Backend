@@ -2024,10 +2024,7 @@ app.post("/api/b2b/services", async (req, res) => {
         NguoiPhuTrachId: NguoiPhuTrachId || null, 
         InvoiceUrl: InvoiceUrl || "",                 
         YeuCauHoaDon: YeuCauHoaDon || "",       
-        GoiDichVu: GoiDichVu || "",     
-        TrangThai: finalStatus, 
-  
-        // Lưu tài chính
+        GoiDichVu: GoiDichVu || "",    
         DoanhThuTruocChietKhau: dtTruoc, 
         MucChietKhau: phanTramCK,
         SoTienChietKhau: tienCK,
