@@ -1922,7 +1922,7 @@ app.post("/api/b2b/services", async (req, res) => {
       NgayHoanThanh, YeuCauHoaDon, InvoiceUrl, 
       GhiChu, NguoiPhuTrachId, GoiDichVu,
       DoanhThuTruocChietKhau, Vi, MucChietKhau,
-      approveAction, userId 
+      approveAction, userId, ChiTietDichVu
     } = req.body;
 
     if (!DoanhNghiepID || !LoaiDichVu) {
@@ -2005,6 +2005,7 @@ app.post("/api/b2b/services", async (req, res) => {
         SoTienChietKhau: tienCK,
         DoanhThuSauChietKhau: dtSau, 
         Vi: viTien,
+        ChiTietDichVu: ChiTietDichVu || null,
         
         CreatedAt: new Date().toISOString()
       }])
@@ -2040,7 +2041,8 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
         GoiDichVu, 
         NguoiPhuTrachId, 
         approveAction, 
-        userId  
+        userId,
+        ChiTietDichVu
     } = req.body;
 
     // Lấy thông tin hiện tại
@@ -2158,6 +2160,7 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
         GoiDichVu: GoiDichVu || current.GoiDichVu,   
         GhiChu: GhiChu || current.GhiChu,
         NguoiPhuTrachId: NguoiPhuTrachId || current.NguoiPhuTrachId,
+        ChiTietDichVu: ChiTietDichVu ?? current.ChiTietDichVu,
         UpdatedAt: new Date().toISOString()
       })
       .eq("STT", id)
