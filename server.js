@@ -2056,10 +2056,7 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
     
     let finalMaDichVu = current.ServiceID;
 
-   
     if (approveAction === "accountant_approve") {
-      
-    
       if (userId) {
          const { data: userCheck } = await supabase
             .from("User")
@@ -2072,50 +2069,88 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
           }
       }
 
- 
-      const dtInput = DoanhThuTruocChietKhau ? parseInt(DoanhThuTruocChietKhau) : 0;
-      const viMoi = Vi ? parseInt(Vi) : 0; 
+      // --- TÍNH TOÁN TỪ CHI TIẾT DỊCH VỤ (ƯU TIÊN) ---
+      let totalRevenueBeforeDiscount = 0;
+      let totalDiscountAmount = 0;
+      let totalRevenueAfterDiscount = 0;
+      let mucChietKhauFinal = 0;
 
-    
-      let chietKhauFinal = 0;
+      // 1. NẾU CÓ ChiTietDichVu → tính từ JSON chi tiết
+      if (ChiTietDichVu && ChiTietDichVu.main && ChiTietDichVu.main.revenue !== undefined) {
+        console.log("📊 Tính toán từ ChiTietDichVu:", ChiTietDichVu);
+        
+        // Dịch vụ chính
+        const mainRevenue = parseFloat(ChiTietDichVu.main.revenue) || 0;
+        const mainDiscountRate = parseFloat(ChiTietDichVu.main.discount) || 0;
+        const mainDiscountAmount = mainRevenue * (mainDiscountRate / 100);
+        
+        totalRevenueBeforeDiscount += mainRevenue;
+        totalDiscountAmount += mainDiscountAmount;
 
-      if (req.body.MucChietKhau !== undefined && req.body.MucChietKhau !== "") {
-          chietKhauFinal = parseFloat(req.body.MucChietKhau);
-      } else {
+        // Dịch vụ phụ
+        if (ChiTietDichVu.sub && Array.isArray(ChiTietDichVu.sub)) {
+          ChiTietDichVu.sub.forEach(subService => {
+            const subRevenue = parseFloat(subService.revenue) || 0;
+            const subDiscountRate = parseFloat(subService.discount) || 0;
+            const subDiscountAmount = subRevenue * (subDiscountRate / 100);
+            
+            totalRevenueBeforeDiscount += subRevenue;
+            totalDiscountAmount += subDiscountAmount;
+          });
+        }
 
-          const { data: ds } = await supabase
-             .from("B2B_SERVICES")
-             .select("DoanhThuSauChietKhau")
-             .eq("DoanhNghiepID", current.DoanhNghiepID);
+        totalRevenueAfterDiscount = totalRevenueBeforeDiscount - totalDiscountAmount;
+        
+        // Lấy mức chiết khấu chính (từ dịch vụ chính)
+        mucChietKhauFinal = mainDiscountRate;
+      } 
+      // 2. NẾU KHÔNG CÓ ChiTietDichVu → dùng dữ liệu cũ
+      else {
+        console.log("📊 Sử dụng dữ liệu cũ");
+        totalRevenueBeforeDiscount = DoanhThuTruocChietKhau ? parseFloat(DoanhThuTruocChietKhau) : 0;
+        
+        // Tính chiết khấu từ hạng
+        const { data: ds } = await supabase
+          .from("B2B_SERVICES")
+          .select("DoanhThuSauChietKhau")
+          .eq("DoanhNghiepID", current.DoanhNghiepID);
 
-          const totalCurrent = ds?.reduce((sum, i) => sum + (i.DoanhThuSauChietKhau || 0), 0) ?? 0;
-          const { chietKhau } = tinhHangVaChietKhau(totalCurrent); 
-          chietKhauFinal = chietKhau;
+        const totalCurrent = ds?.reduce((sum, i) => sum + (i.DoanhThuSauChietKhau || 0), 0) ?? 0;
+        const { chietKhau } = tinhHangVaChietKhau(totalCurrent); 
+        mucChietKhauFinal = chietKhau;
+        
+        totalDiscountAmount = totalRevenueBeforeDiscount * (mucChietKhauFinal / 100);
+        totalRevenueAfterDiscount = totalRevenueBeforeDiscount - totalDiscountAmount;
       }
 
-    
-      const soCK = Math.round((dtInput * chietKhauFinal) / 100);
-      const dtSau = dtInput - soCK - viMoi;
+      // 3. Xử lý Ví
+      const viMoi = Vi ? parseFloat(Vi) : 0;
+      
+      // Kiểm tra ví nếu approve
+      if (approveAction === "accountant_approve") {
+        const { data: approved } = await supabase
+          .from("B2B_APPROVED")
+          .select("SoDuVi")
+          .eq("ID", current.DoanhNghiepID)
+          .maybeSingle();
 
-      const { data: approved } = await supabase
-        .from("B2B_APPROVED")
-        .select("SoDuVi")
-        .eq("ID", current.DoanhNghiepID)
-        .maybeSingle();
+        const soDu = approved?.SoDuVi ?? 0;
 
-      const soDu = approved?.SoDuVi ?? 0;
+        if (soDu < viMoi) {
+          return res.status(400).json({ success: false, message: `Số dư ví không đủ (Hiện có: ${soDu})` });
+        }
 
-      if (soDu < viMoi) {
-        return res.status(400).json({ success: false, message: `Số dư ví không đủ (Hiện có: ${soDu})` });
+        if (viMoi > 0) {
+          await supabase.from("B2B_APPROVED")
+            .update({ SoDuVi: soDu - viMoi })
+            .eq("ID", current.DoanhNghiepID);
+        }
       }
 
-      if (viMoi > 0) {
-        await supabase.from("B2B_APPROVED")
-          .update({ SoDuVi: soDu - viMoi })
-          .eq("ID", current.DoanhNghiepID);
-      }
 
-   
+      totalRevenueAfterDiscount = Math.max(0, totalRevenueAfterDiscount - viMoi);
+
+      // 5. Tạo mã dịch vụ mới nếu đang duyệt
       finalMaDichVu = await generateServiceCode(
         supabase,
         LoaiDichVu || current.LoaiDichVu,
@@ -2123,52 +2158,77 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
         DanhMuc || current.DanhMuc 
       );
 
-      
-      req.body.DoanhThuSauChietKhau = dtSau;
-      req.body.SoTienChietKhau = soCK;
-      req.body.MucChietKhau = chietKhauFinal;
-
+     
       const { data: dsMoi } = await supabase
-             .from("B2B_SERVICES")
-             .select("DoanhThuSauChietKhau")
-             .eq("DoanhNghiepID", current.DoanhNghiepID);
+        .from("B2B_SERVICES")
+        .select("DoanhThuSauChietKhau")
+        .eq("DoanhNghiepID", current.DoanhNghiepID);
+        
       const totalCurrentMoi = dsMoi?.reduce((sum, i) => sum + (i.DoanhThuSauChietKhau || 0), 0) ?? 0;
-      req.body.TongDoanhThuTichLuy = totalCurrentMoi + dtSau;
+      const newTongDoanhThuTichLuy = totalCurrentMoi + totalRevenueAfterDiscount;
+
+
+      req.body.DoanhThuTruocChietKhau = totalRevenueBeforeDiscount;
+      req.body.DoanhThuSauChietKhau = totalRevenueAfterDiscount;
+      req.body.SoTienChietKhau = totalDiscountAmount;
+      req.body.MucChietKhau = mucChietKhauFinal;
+      req.body.TongDoanhThuTichLuy = newTongDoanhThuTichLuy;
+      
+      console.log("📊 Kết quả tính toán:", {
+        totalRevenueBeforeDiscount,
+        totalDiscountAmount,
+        totalRevenueAfterDiscount,
+        mucChietKhauFinal,
+        viMoi
+      });
     }
 
-    // --- CẬP NHẬT DB ---
+  
+    const updateData = {
+      LoaiDichVu: LoaiDichVu || current.LoaiDichVu,
+      DanhMuc: DanhMuc || current.DanhMuc,
+      TenDichVu: TenDichVu || current.TenDichVu,
+      ServiceID: finalMaDichVu,
+      NgayThucHien: NgayThucHien || current.NgayThucHien,
+      NgayHoanThanh: NgayHoanThanh || current.NgayHoanThanh,
+      
+
+      DoanhThuTruocChietKhau: req.body.DoanhThuTruocChietKhau ?? current.DoanhThuTruocChietKhau,
+      DoanhThuSauChietKhau: req.body.DoanhThuSauChietKhau ?? current.DoanhThuSauChietKhau,
+      SoTienChietKhau: req.body.SoTienChietKhau ?? current.SoTienChietKhau,
+      MucChietKhau: req.body.MucChietKhau ?? current.MucChietKhau,
+      TongDoanhThuTichLuy: req.body.TongDoanhThuTichLuy ?? current.TongDoanhThuTichLuy,
+      Vi: Vi !== undefined ? Vi : current.Vi, 
+
+     
+      YeuCauHoaDon: YeuCauHoaDon || current.YeuCauHoaDon,
+      InvoiceUrl: InvoiceUrl || current.InvoiceUrl,    
+      GoiDichVu: GoiDichVu || current.GoiDichVu,   
+      GhiChu: GhiChu || current.GhiChu,
+      NguoiPhuTrachId: NguoiPhuTrachId || current.NguoiPhuTrachId,
+      
+    
+      ChiTietDichVu: ChiTietDichVu || current.ChiTietDichVu,
+      
+      UpdatedAt: new Date().toISOString()
+    };
+
+   
+
     const { data, error } = await supabase
       .from("B2B_SERVICES")
-      .update({
-        LoaiDichVu: LoaiDichVu || current.LoaiDichVu,
-        DanhMuc: DanhMuc || current.DanhMuc,
-        TenDichVu: TenDichVu || current.TenDichVu,
-        ServiceID: finalMaDichVu,
-        NgayThucHien: NgayThucHien || current.NgayThucHien,
-        NgayHoanThanh: NgayHoanThanh || current.NgayHoanThanh,
-        
-        // Cập nhật các trường tài chính (dùng ?? để giữ nguyên nếu không có thay đổi)
-        DoanhThuTruocChietKhau: req.body.DoanhThuTruocChietKhau ?? current.DoanhThuTruocChietKhau,
-        DoanhThuSauChietKhau: req.body.DoanhThuSauChietKhau ?? current.DoanhThuSauChietKhau,
-        SoTienChietKhau: req.body.SoTienChietKhau ?? current.SoTienChietKhau,
-        MucChietKhau: req.body.MucChietKhau ?? current.MucChietKhau,
-        TongDoanhThuTichLuy: req.body.TongDoanhThuTichLuy ?? current.TongDoanhThuTichLuy,
-        Vi: req.body.Vi ?? current.Vi,
-
-        YeuCauHoaDon: YeuCauHoaDon || current.YeuCauHoaDon,
-        InvoiceUrl: InvoiceUrl || current.InvoiceUrl,    
-        GoiDichVu: GoiDichVu || current.GoiDichVu,   
-        GhiChu: GhiChu || current.GhiChu,
-        NguoiPhuTrachId: NguoiPhuTrachId || current.NguoiPhuTrachId,
-        ChiTietDichVu: ChiTietDichVu ?? current.ChiTietDichVu,
-        UpdatedAt: new Date().toISOString()
-      })
+      .update(updateData)
       .eq("STT", id)
       .select()
       .single();
 
     if (error) throw error;
-    res.json({ success: true, data, newCode: finalMaDichVu });
+    
+    res.json({ 
+      success: true, 
+      data, 
+      newCode: finalMaDichVu 
+    });
 
   } catch (err) {
     console.error("❌ Lỗi update B2B_SERVICES:", err);
