@@ -1946,7 +1946,8 @@ app.post("/api/b2b/services", async (req, res) => {
       DoanhNghiepID, LoaiDichVu, DanhMuc, TenDichVu, NgayThucHien,
       NgayHoanThanh, YeuCauHoaDon, InvoiceUrl, 
       GhiChu, NguoiPhuTrachId, GoiDichVu,
-      DoanhThuTruocChietKhau, Vi, MucChietKhau 
+      DoanhThuTruocChietKhau, Vi, MucChietKhau,
+      approveAction, userId 
     } = req.body;
 
     if (!DoanhNghiepID || !LoaiDichVu) {
@@ -1955,12 +1956,60 @@ app.post("/api/b2b/services", async (req, res) => {
 
     const dtTruoc = DoanhThuTruocChietKhau ? parseInt(DoanhThuTruocChietKhau) : 0;
     const viTien = Vi ? parseInt(Vi) : 0;
-    const phanTramCK = MucChietKhau ? parseFloat(MucChietKhau) : 0;
-
-
+    
+   
+    const phanTramCK = MucChietKhau ? parseFloat(MucChietKhau) : 0; 
+    
     const tienCK = Math.round((dtTruoc * phanTramCK) / 100);
     const dtSau = dtTruoc - tienCK - viTien;
 
+
+    let finalServiceCode = null;
+    let finalStatus = "Chờ Kế toán duyệt"; 
+    
+    if (approveAction === "accountant_approve") {
+        // Kiểm tra quyền của userId
+        if (userId) {
+            const { data: userCheck } = await supabase
+                .from("User")
+                .select("is_director, perm_approve_b2b, is_accountant, is_admin")
+                .eq("id", userId)
+                .single();
+            
+         
+            if (userCheck && (userCheck.is_director || userCheck.perm_approve_b2b )) {
+                
+      
+                if (viTien > 0) {
+                    const { data: approvedEnt } = await supabase
+                        .from("B2B_APPROVED")
+                        .select("SoDuVi")
+                        .eq("ID", DoanhNghiepID)
+                        .maybeSingle();
+                    
+                    const soDuHienTai = approvedEnt?.SoDuVi ?? 0;
+                    if (soDuHienTai < viTien) {
+                        return res.status(400).json({ success: false, message: `Số dư ví không đủ để duyệt ngay (Hiện có: ${soDuHienTai})` });
+                    }
+                    
+                    // Trừ ví
+                    await supabase.from("B2B_APPROVED")
+                        .update({ SoDuVi: soDuHienTai - viTien })
+                        .eq("ID", DoanhNghiepID);
+                }
+                finalServiceCode = await generateServiceCode(
+                    supabase,
+                    LoaiDichVu,
+                    YeuCauHoaDon,
+                    DanhMuc || ""
+                );
+                
+                finalStatus = "Đã duyệt"; 
+            }
+        }
+    }
+
+    // 3. Insert vào DB
     const { data, error } = await supabase
       .from("B2B_SERVICES")
       .insert([{
@@ -1968,14 +2017,15 @@ app.post("/api/b2b/services", async (req, res) => {
         LoaiDichVu,
         DanhMuc: DanhMuc || "",
         TenDichVu: TenDichVu || "",
-        ServiceID: null, 
+        ServiceID: finalServiceCode, 
         NgayThucHien,
         NgayHoanThanh: NgayHoanThanh || null, 
         GhiChu: GhiChu || "",
         NguoiPhuTrachId: NguoiPhuTrachId || null, 
         InvoiceUrl: InvoiceUrl || "",                 
-        YeuCauHoaDon: YeuCauHoaDon || "No",       
-        GoiDichVu: GoiDichVu || "Thông thường",     
+        YeuCauHoaDon: YeuCauHoaDon || "",       
+        GoiDichVu: GoiDichVu || "",     
+        TrangThai: finalStatus, 
   
         // Lưu tài chính
         DoanhThuTruocChietKhau: dtTruoc, 
@@ -1991,7 +2041,9 @@ app.post("/api/b2b/services", async (req, res) => {
 
     if (error) throw error;
 
-    res.json({ success: true, data });
+
+    res.json({ success: true, data, newCode: finalServiceCode });
+
   } catch (err) {
     console.error("❌ Lỗi thêm service:", err);
     res.status(500).json({ success: false, message: err.message });
