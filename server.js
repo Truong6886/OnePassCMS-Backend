@@ -1853,7 +1853,7 @@ app.get("/api/b2b/services", async (req, res) => {
     if (DoanhNghiepID) query = query.eq("DoanhNghiepID", DoanhNghiepID);
 
     const { data, count, error } = await query
-      .order("STT", { ascending: false })
+      .order("STT", { ascending: true })
       .range(from, to);
 
     if (error) throw error;
