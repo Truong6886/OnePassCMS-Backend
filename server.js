@@ -2942,7 +2942,7 @@ app.get("/api/yeucau", async (req, res) => {
       `,
         { count: "exact" }
       )
-      .order("YeuCauID", { ascending: false }) // Sắp xếp mới nhất lên đầu
+      .order("YeuCauID", { ascending: true }) 
       .range(from, to);
 
   
