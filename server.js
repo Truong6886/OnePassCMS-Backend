@@ -2987,31 +2987,9 @@ app.get("/api/yeucau", async (req, res) => {
     const { data, count, error } = await query;
     if (error) throw error;
 
-    
-    const phoneNumbers = [...new Set(data.map(item => item.SoDienThoai).filter(Boolean))];
-    let revenueMap = {};
+  
+    const enrichedData = data; 
 
-    if (phoneNumbers.length > 0) {
-      const { data: revenueData, error: revError } = await supabase
-        .from("YeuCau")
-        .select("SoDienThoai, DoanhThuSauChietKhau")
-        .in("SoDienThoai", phoneNumbers);
-
-      if (!revError && revenueData) {
-        revenueData.forEach(r => {
-          const sdt = r.SoDienThoai;
-          const revenue = r.DoanhThuSauChietKhau || 0;
-          revenueMap[sdt] = (revenueMap[sdt] || 0) + revenue;
-        });
-      }
-    }
-
-    const enrichedData = data.map(item => ({
-      ...item,
-      
-      TongDoanhThuTichLuy: item.SoDienThoai ? (revenueMap[item.SoDienThoai] || 0) : (item.DoanhThuSauChietKhau || 0)
-    }));
-    // ------------------------------------------------
 
     const total = count ?? 0;
     const totalPages = Math.ceil(total / pageLimit);
@@ -3029,7 +3007,6 @@ app.get("/api/yeucau", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-
 app.post("/api/verify-password", async (req, res) => {
   try {
     const { username, password } = req.body;
