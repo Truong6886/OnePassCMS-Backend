@@ -1865,14 +1865,12 @@ app.get("/api/b2b/services", async (req, res) => {
       NgayHoanThanh: item.NgayHoanThanh,
       DoanhThuTruocChietKhau: item.DoanhThuTruocChietKhau,
       MucChietKhau: item.MucChietKhau,
-      DanhMuc: item.DanhMuc || "",
       SoTienChietKhau: item.SoTienChietKhau,
       DoanhThuSauChietKhau: item.DoanhThuSauChietKhau,
       TongDoanhThuTichLuy: item.TongDoanhThuTichLuy,
       Vi: item.Vi,
-      NguoiPhuTrachId: item.NguoiPhuTrachId,
-      
-      
+      ChiTietDichVu: item.ChiTietDichVu,
+      NguoiPhuTrachId: item.NguoiPhuTrachId,      
       NguoiPhuTrach: item.NguoiPhuTrach || null, 
       NguoiPhuTrachName: item.NguoiPhuTrach ? item.NguoiPhuTrach.name : "" 
       // --------------------
