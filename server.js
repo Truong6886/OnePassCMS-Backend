@@ -2861,6 +2861,7 @@ app.get("/api/yeucau", async (req, res) => {
       .select(
         `
         *,
+        ChiTietDichVu,
         NguoiPhuTrach:User!YeuCau_NguoiPhuTrachId_fkey(
           id,
           name,
@@ -3120,10 +3121,11 @@ app.post("/api/yeucau", async (req, res) => {
         ConfirmPassword,
         DoanhThuTruocChietKhau, 
         MucChietKhau, 
+        ChiTietDichVu,
         ...restData 
     } = req.body;
 
-    let newRequestData = { ...restData };
+    let newRequestData = { ...restData,ChiTietDichVu };
 
 
     delete newRequestData.Vi;
