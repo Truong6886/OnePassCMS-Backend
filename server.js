@@ -2650,25 +2650,34 @@ app.delete("/api/yeucau/:id", async (req, res) => {
 });
 
 
+
+
 app.put("/api/yeucau/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    let updateData = req.body;
+    
+   
+    const { 
+        autoApprove,      
+        ConfirmPassword, 
+        ...updateData     
+    } = req.body;
 
     console.log("📝 Cập nhật yêu cầu (trước khi xử lý):", { id, updateData });
+
+
     for (const key of Object.keys(updateData)) {
       if (updateData[key] === "") updateData[key] = null;
     }
 
-    // Nếu có NguoiPhuTrachId thì ép kiểu về integer, hoặc null nếu không hợp lệ
     if (updateData.NguoiPhuTrachId !== null && updateData.NguoiPhuTrachId !== undefined) {
       const parsed = parseInt(updateData.NguoiPhuTrachId, 10);
       updateData.NguoiPhuTrachId = isNaN(parsed) ? null : parsed;
     }
 
-    console.log("🧹 Dữ liệu sau khi chuẩn hóa:", updateData);
+    console.log("Dữ liệu sau khi chuẩn hóa:", updateData);
 
-    // Cập nhật trước
+
     const { error: updateError } = await supabase
       .from("YeuCau")
       .update(updateData)
@@ -2676,10 +2685,12 @@ app.put("/api/yeucau/:id", async (req, res) => {
 
     if (updateError) throw updateError;
 
+   
     const { data, error } = await supabase
       .from("YeuCau")
       .select(`
         *,
+        ChiTietDichVu, 
         NguoiPhuTrach:User!YeuCau_NguoiPhuTrachId_fkey(
           id,
           name,
@@ -2696,11 +2707,11 @@ app.put("/api/yeucau/:id", async (req, res) => {
     res.json({ success: true, data });
   } catch (err) {
     console.error("❌ Lỗi cập nhật yêu cầu:", err);
+ 
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// [MỚI] API Lấy danh sách doanh nghiệp bị từ chối (B2B_REJECTED)
 app.get("/api/b2b/reject", async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
