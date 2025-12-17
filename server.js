@@ -444,37 +444,28 @@ global.io = io;
 app.put("/api/yeucau/approve/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    
     const { 
-      userId, 
-      NguoiPhuTrachId,
-      HoTen, SoDienThoai, Email, MaVung,
-      LoaiDichVu, TenDichVu, GoiDichVu,
-      TenHinhThuc, CoSoTuVan,
-      ChonNgay, Gio, NoiDung, GhiChu,
-      DanhMuc,
-      ChiTietDichVu, // Nhận cục JSON chi tiết
-      Vi 
+      userId, NguoiPhuTrachId, HoTen, SoDienThoai, Email, MaVung,
+      LoaiDichVu, TenDichVu, GoiDichVu, TenHinhThuc, CoSoTuVan,
+      ChonNgay, Gio, NoiDung, GhiChu, DanhMuc, ChiTietDichVu, Vi 
     } = req.body; 
 
-    // --- 1. TÍNH TOÁN DOANH THU CỦA YÊU CẦU NÀY (Main + Sub) ---
+    
     let totalRevenue = 0;
     let totalDiscountAmt = 0;
     
-    // Parse ChiTietDichVu nếu nó là string
     let details = ChiTietDichVu;
     if (typeof details === 'string') {
         try { details = JSON.parse(details); } catch (e) { details = null; }
     }
 
     if (details && details.main) {
-        // Cộng dịch vụ chính
+       
         const mainRev = parseFloat(details.main.revenue) || 0;
         const mainDisc = parseFloat(details.main.discount) || 0;
         totalRevenue += mainRev;
         totalDiscountAmt += mainRev * (mainDisc / 100);
 
-        // Cộng dịch vụ phụ (nếu có)
         if (details.sub && Array.isArray(details.sub)) {
             details.sub.forEach(sub => {
                 const subRev = parseFloat(sub.revenue) || 0;
@@ -484,80 +475,58 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
             });
         }
     } else {
-        // Fallback: Nếu không có chi tiết, dùng dữ liệu phẳng gửi lên
+  
         totalRevenue = parseInt(req.body.DoanhThuTruocChietKhau) || 0;
         const phanTram = parseFloat(req.body.MucChietKhau) || 0;
         totalDiscountAmt = Math.round((totalRevenue * phanTram) / 100);
     }
 
     const viTien = parseInt(Vi) || 0;
-    // Doanh thu thực nhận của yêu cầu này
+  
     const currentNetRevenue = totalRevenue - totalDiscountAmt - viTien;
 
-    // --- 2. TÍNH TỔNG TÍCH LUỸ (Lịch sử khách hàng + Hiện tại) ---
-    // Tìm tổng doanh thu các đơn cũ của SĐT này (trừ đơn hiện tại đang sửa)
+
     const { data: historyData } = await supabase
         .from("YeuCau")
         .select("DoanhThuSauChietKhau")
         .eq("SoDienThoai", SoDienThoai)
-        .neq("YeuCauID", id); // Không cộng chính nó (vì chưa update)
+        .neq("YeuCauID", id); 
 
     const historyTotal = historyData?.reduce((sum, item) => sum + (item.DoanhThuSauChietKhau || 0), 0) ?? 0;
     
-    // Tổng tích luỹ mới = Lịch sử + (Doanh thu thực nhận đơn này)
+   
     const newTongDoanhThuTichLuy = historyTotal + currentNetRevenue;
 
-    // --- 3. LOGIC CẤP MÃ HỒ SƠ ---
-    const { data: currentReq, error: fetchError } = await supabase
-      .from("YeuCau")
-      .select("*")
-      .eq("YeuCauID", id)
-      .single();
-
-    if (fetchError || !currentReq) return res.status(404).json({ success: false, message: "Không tìm thấy yêu cầu" });
-
+ 
+    const { data: currentReq } = await supabase.from("YeuCau").select("*").eq("YeuCauID", id).single();
     let newServiceCode = currentReq.MaHoSo;
     if (!newServiceCode || newServiceCode.length < 5) {
-         newServiceCode = await generateB2CServiceCode(
-            supabase, 
-            LoaiDichVu || currentReq.LoaiDichVu, 
-            currentReq.Invoice,
-            DanhMuc || currentReq.DanhMuc 
-         );
+         newServiceCode = await generateB2CServiceCode(supabase, LoaiDichVu || currentReq.LoaiDichVu, currentReq.Invoice, DanhMuc || currentReq.DanhMuc);
     }
 
-    // --- 4. UPDATE DB ---
+    // 4. UPDATE DB
     const { data: updatedData, error: updateError } = await supabase
       .from("YeuCau")
       .update({
-        HoTen, SoDienThoai, Email, MaVung,
-        LoaiDichVu, TenDichVu, GoiDichVu,
-        TenHinhThuc, CoSoTuVan,
-        ChonNgay, Gio, NoiDung, GhiChu,
-        DanhMuc,
+        HoTen, SoDienThoai, Email, MaVung, LoaiDichVu, TenDichVu, GoiDichVu,
+        TenHinhThuc, CoSoTuVan, ChonNgay, Gio, NoiDung, GhiChu, DanhMuc,
         MaHoSo: newServiceCode,
         NguoiPhuTrachId: NguoiPhuTrachId || userId,
-        ChiTietDichVu: details, 
-       
-
-     
+        ChiTietDichVu: details,
         DoanhThuTruocChietKhau: totalRevenue,
-        MucChietKhau: totalRevenue > 0 ? (totalDiscountAmt / totalRevenue * 100) : 0, 
+        MucChietKhau: totalRevenue > 0 ? (totalDiscountAmt / totalRevenue * 100) : 0,
         SoTienChietKhau: totalDiscountAmt,
         DoanhThuSauChietKhau: currentNetRevenue,
-        TongDoanhThuTichLuy: newTongDoanhThuTichLuy, 
+        TongDoanhThuTichLuy: newTongDoanhThuTichLuy,
         Vi: viTien
       })
       .eq("YeuCauID", id)
-      .select()
-      .single();
+      .select().single();
 
     if (updateError) throw updateError;
-
     res.json({ success: true, message: `Duyệt thành công. Mã: ${newServiceCode}`, data: updatedData });
 
   } catch (err) {
-    console.error("❌ Approve Error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
