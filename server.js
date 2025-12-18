@@ -38,7 +38,6 @@ function translateServiceName(name) {
       "B2B 서비스": "Dịch vụ B2B",
       "기타": "Khác",
     };
-  // Nếu tìm thấy trong map thì trả về tiếng Việt, không thì giữ nguyên
   return map[name?.trim()] || name?.trim() || "";
 }
 
@@ -441,6 +440,72 @@ global.io = io;
 
 
 
+
+
+async function sendNotificationToApprovers(payload) {
+  if (!global.io) return;
+  try {
+    
+    const { data: approvers, error } = await supabase
+      .from("User")
+      .select("id")
+      .or("is_director.eq.true,perm_approve_b2c.eq.true");
+
+    if (error) {
+      console.error("❌ Lỗi lấy người duyệt:", error.message);
+      return;
+    }
+
+    if (approvers && approvers.length > 0) {
+      approvers.forEach((user) => {
+        const socketId = userSocketMap.get(String(user.id));
+        if (socketId) {
+     
+          global.io.to(socketId).emit("new_request", {
+             ...payload,
+             title: "Yêu cầu mới cần duyệt",
+             type: "needs_approval"
+          });
+          console.log(`📡 Đã gửi thông báo DUYỆT tới User ID ${user.id}`);
+        }
+      });
+    }
+  } catch (err) {
+    console.error("❌ Socket Error:", err);
+  }
+}
+async function sendNotificationToAdmins(payload) {
+  if (!global.io) return;
+  try {
+    // Lấy danh sách Admin
+    const { data: admins, error } = await supabase
+      .from("User")
+      .select("id")
+      .eq("is_admin", true);
+
+    if (error) {
+       console.error("❌ Lỗi lấy admin:", error.message);
+       return;
+    }
+
+    if (admins && admins.length > 0) {
+      admins.forEach((user) => {
+        const socketId = userSocketMap.get(String(user.id));
+        if (socketId) {
+          // Gửi sự kiện thông báo đã duyệt
+          global.io.to(socketId).emit("new_request", {
+            ...payload,
+             title: "Hồ sơ đã được duyệt & cấp mã",
+             type: "approved_done"
+          });
+          console.log(`📡 Đã gửi thông báo HOÀN THÀNH tới Admin ID ${user.id}`);
+        }
+      });
+    }
+  } catch (err) {
+    console.error("❌ Socket Error:", err);
+  }
+}
 app.put("/api/yeucau/approve/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -450,7 +515,7 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
       ChonNgay, Gio, NoiDung, GhiChu, DanhMuc, ChiTietDichVu, Vi 
     } = req.body; 
 
-    
+    // --- 1. TÍNH TOÁN DOANH THU & CHIẾT KHẤU ---
     let totalRevenue = 0;
     let totalDiscountAmt = 0;
     
@@ -460,7 +525,6 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
     }
 
     if (details && details.main) {
-       
         const mainRev = parseFloat(details.main.revenue) || 0;
         const mainDisc = parseFloat(details.main.discount) || 0;
         totalRevenue += mainRev;
@@ -475,17 +539,15 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
             });
         }
     } else {
-  
         totalRevenue = parseInt(req.body.DoanhThuTruocChietKhau) || 0;
         const phanTram = parseFloat(req.body.MucChietKhau) || 0;
         totalDiscountAmt = Math.round((totalRevenue * phanTram) / 100);
     }
 
     const viTien = parseInt(Vi) || 0;
-  
     const currentNetRevenue = totalRevenue - totalDiscountAmt - viTien;
 
-
+    // --- 2. TÍNH TỔNG DOANH THU TÍCH LŨY ---
     const { data: historyData } = await supabase
         .from("YeuCau")
         .select("DoanhThuSauChietKhau")
@@ -493,18 +555,18 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
         .neq("YeuCauID", id); 
 
     const historyTotal = historyData?.reduce((sum, item) => sum + (item.DoanhThuSauChietKhau || 0), 0) ?? 0;
-    
-   
     const newTongDoanhThuTichLuy = historyTotal + currentNetRevenue;
 
- 
+    // --- 3. SINH MÃ HỒ SƠ (NẾU CHƯA CÓ) ---
     const { data: currentReq } = await supabase.from("YeuCau").select("*").eq("YeuCauID", id).single();
     let newServiceCode = currentReq.MaHoSo;
+    
+    // Chỉ sinh mã nếu chưa có hoặc mã quá ngắn (không đúng định dạng)
     if (!newServiceCode || newServiceCode.length < 5) {
          newServiceCode = await generateB2CServiceCode(supabase, LoaiDichVu || currentReq.LoaiDichVu, currentReq.Invoice, DanhMuc || currentReq.DanhMuc);
     }
 
-    // 4. UPDATE DB
+    // --- 4. UPDATE DB ---
     const { data: updatedData, error: updateError } = await supabase
       .from("YeuCau")
       .update({
@@ -524,9 +586,25 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
       .select().single();
 
     if (updateError) throw updateError;
+
+
+    if (global.io) {
+        const adminPayload = {
+            YeuCauID: id,
+            HoTen: HoTen || currentReq.HoTen, 
+            MaHoSo: newServiceCode,     
+            ThoiGian: new Date().toISOString(),
+           
+        };
+        await sendNotificationToAdmins(adminPayload);
+        console.log(`📡 Đã gửi thông báo duyệt hồ sơ ${newServiceCode} tới Admin`);
+    }
+    // ----------------------------------
+
     res.json({ success: true, message: `Duyệt thành công. Mã: ${newServiceCode}`, data: updatedData });
 
   } catch (err) {
+    console.error("❌ Lỗi duyệt yêu cầu:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -3166,9 +3244,7 @@ app.post("/api/tuvan", async (req, res) => {
       console.error("❌ Lỗi gửi email admin:", emailErr);
     }
 
-    if (global.io) {
-      global.io.emit("new_request", fullRecord);
-    }
+    await sendNotificationToApprovers(fullRecord);
 
     return res.json({
       success: true,
