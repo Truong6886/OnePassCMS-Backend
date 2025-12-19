@@ -2749,6 +2749,7 @@ app.put("/api/yeucau/:id", async (req, res) => {
         Vi,
         NgayBatDau,  
         NgayKetThuc,
+        NguoiPhuTrach,
         ...restData     
     } = req.body;
 
