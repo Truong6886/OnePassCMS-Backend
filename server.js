@@ -512,7 +512,8 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
     const { 
       userId, NguoiPhuTrachId, HoTen, SoDienThoai, Email, MaVung,
       LoaiDichVu, TenDichVu, GoiDichVu, TenHinhThuc, CoSoTuVan,
-      ChonNgay, Gio, NoiDung, GhiChu, DanhMuc, ChiTietDichVu, Vi 
+      ChonNgay, Gio, NoiDung, GhiChu, DanhMuc, ChiTietDichVu,NgayBatDau, 
+      NgayKetThuc
     } = req.body; 
 
     // --- 1. TÍNH TOÁN DOANH THU & CHIẾT KHẤU ---
@@ -544,10 +545,9 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
         totalDiscountAmt = Math.round((totalRevenue * phanTram) / 100);
     }
 
-    const viTien = parseInt(Vi) || 0;
-    const currentNetRevenue = totalRevenue - totalDiscountAmt - viTien;
+   
+    const currentNetRevenue = totalRevenue - totalDiscountAmt;
 
-    // --- 2. TÍNH TỔNG DOANH THU TÍCH LŨY ---
     const { data: historyData } = await supabase
         .from("YeuCau")
         .select("DoanhThuSauChietKhau")
@@ -557,16 +557,16 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
     const historyTotal = historyData?.reduce((sum, item) => sum + (item.DoanhThuSauChietKhau || 0), 0) ?? 0;
     const newTongDoanhThuTichLuy = historyTotal + currentNetRevenue;
 
-    // --- 3. SINH MÃ HỒ SƠ (NẾU CHƯA CÓ) ---
+
     const { data: currentReq } = await supabase.from("YeuCau").select("*").eq("YeuCauID", id).single();
     let newServiceCode = currentReq.MaHoSo;
     
-    // Chỉ sinh mã nếu chưa có hoặc mã quá ngắn (không đúng định dạng)
+ 
     if (!newServiceCode || newServiceCode.length < 5) {
          newServiceCode = await generateB2CServiceCode(supabase, LoaiDichVu || currentReq.LoaiDichVu, currentReq.Invoice, DanhMuc || currentReq.DanhMuc);
     }
 
-    // --- 4. UPDATE DB ---
+
     const { data: updatedData, error: updateError } = await supabase
       .from("YeuCau")
       .update({
@@ -580,13 +580,13 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
         SoTienChietKhau: totalDiscountAmt,
         DoanhThuSauChietKhau: currentNetRevenue,
         TongDoanhThuTichLuy: newTongDoanhThuTichLuy,
-        Vi: viTien
+        NgayBatDau: NgayBatDau || null, 
+        NgayKetThuc: NgayKetThuc || null 
       })
       .eq("YeuCauID", id)
       .select().single();
 
     if (updateError) throw updateError;
-
 
     if (global.io) {
         const adminPayload = {
@@ -594,12 +594,10 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
             HoTen: HoTen || currentReq.HoTen, 
             MaHoSo: newServiceCode,     
             ThoiGian: new Date().toISOString(),
-           
         };
         await sendNotificationToAdmins(adminPayload);
         console.log(`📡 Đã gửi thông báo duyệt hồ sơ ${newServiceCode} tới Admin`);
     }
-    // ----------------------------------
 
     res.json({ success: true, message: `Duyệt thành công. Mã: ${newServiceCode}`, data: updatedData });
 
@@ -2738,8 +2736,6 @@ app.delete("/api/yeucau/:id", async (req, res) => {
 
 
 
-
-
 app.put("/api/yeucau/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -2751,23 +2747,26 @@ app.put("/api/yeucau/:id", async (req, res) => {
         DoanhThuTruocChietKhau,
         MucChietKhau, 
         Vi,
+        NgayBatDau,  
+        NgayKetThuc,
         ...restData     
     } = req.body;
 
-    let updatePayload = { ...restData, SoDienThoai }; 
+    let updatePayload = { ...restData, SoDienThoai,NgayBatDau: NgayBatDau || null,
+        NgayKetThuc: NgayKetThuc || null  }; 
   
     if (ChiTietDichVu || DoanhThuTruocChietKhau !== undefined) {
         let totalRevenue = 0;
         let totalDiscountAmt = 0;
         let details = ChiTietDichVu;
         
-        // Parse JSON
+
         if (typeof details === 'string') {
             try { details = JSON.parse(details); } catch (e) { details = null; }
         }
 
         if (details && details.main) {
-            // Tính từ Main + Sub
+           
             const mainRev = parseFloat(details.main.revenue) || 0;
             const mainDisc = parseFloat(details.main.discount) || 0;
             totalRevenue += mainRev;
@@ -2788,8 +2787,8 @@ app.put("/api/yeucau/:id", async (req, res) => {
             totalDiscountAmt = (totalRevenue * phanTram) / 100;
         }
 
-        const viTien = parseFloat(Vi) || 0;
-        const currentNetRevenue = totalRevenue - totalDiscountAmt - viTien;
+     
+        const currentNetRevenue = totalRevenue - totalDiscountAmt; 
 
      
         let targetPhone = SoDienThoai;
@@ -2815,7 +2814,6 @@ app.put("/api/yeucau/:id", async (req, res) => {
         updatePayload.DoanhThuTruocChietKhau = totalRevenue;
         updatePayload.SoTienChietKhau = totalDiscountAmt;
         updatePayload.DoanhThuSauChietKhau = currentNetRevenue;
-        updatePayload.Vi = viTien;
       
         updatePayload.MucChietKhau = totalRevenue > 0 ? (totalDiscountAmt / totalRevenue * 100) : 0;
     }
@@ -3271,43 +3269,39 @@ app.post("/api/yeucau", async (req, res) => {
         DoanhThuTruocChietKhau, 
         MucChietKhau, 
         ChiTietDichVu,
+        NgayBatDau, 
+        NgayKetThuc,
         ...restData 
     } = req.body;
 
-    let newRequestData = { ...restData,ChiTietDichVu };
-
-
-    delete newRequestData.Vi;
+    let newRequestData = { ...restData, ChiTietDichVu,NgayBatDau: NgayBatDau || null, 
+        NgayKetThuc: NgayKetThuc || null };
 
     console.log("[CMS] Tạo yêu cầu mới. AutoApprove:", autoApprove);
 
-
+    // Xử lý dữ liệu rỗng
     for (const key of Object.keys(newRequestData)) {
       if (newRequestData[key] === "" || newRequestData[key] === undefined) {
         newRequestData[key] = null;
       }
     }
     
-    
     if (newRequestData.NguoiPhuTrachId) {
       newRequestData.NguoiPhuTrachId = parseInt(newRequestData.NguoiPhuTrachId, 10) || null;
     }
  
     if (!newRequestData.NgayTao) newRequestData.NgayTao = new Date().toISOString();
-
-   
     if (autoApprove === true || autoApprove === "true") {
         // a. Tính toán tài chính
         const dtTruoc = parseInt(DoanhThuTruocChietKhau) || 0;
         const phanTram = parseFloat(MucChietKhau) || 0;
         
-   
         const tienChietKhau = Math.round((dtTruoc * phanTram) / 100);
         
-     
+      
         const dtSau = dtTruoc - tienChietKhau; 
 
-  
+        
         const newCode = await generateB2CServiceCode(
             supabase, 
             newRequestData.LoaiDichVu, 
@@ -3315,19 +3309,18 @@ app.post("/api/yeucau", async (req, res) => {
             newRequestData.DanhMuc
         );
 
-     
+  
         newRequestData.MaHoSo = newCode;
         newRequestData.DoanhThuTruocChietKhau = dtTruoc;
         newRequestData.MucChietKhau = phanTram;
         newRequestData.SoTienChietKhau = tienChietKhau;
         newRequestData.DoanhThuSauChietKhau = dtSau;
         
-     
         if (!newRequestData.NguoiPhuTrachId && currentUserId) {
             newRequestData.NguoiPhuTrachId = parseInt(currentUserId);
         }
     } else {
-
+        // Nếu không auto approve thì reset về 0
         newRequestData.DoanhThuTruocChietKhau = 0;
         newRequestData.DoanhThuSauChietKhau = 0;
         newRequestData.SoTienChietKhau = 0;
