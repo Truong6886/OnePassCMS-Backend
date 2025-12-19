@@ -3010,50 +3010,52 @@ app.get("/api/yeucau", async (req, res) => {
     const from = (pageNum - 1) * pageLimit;
     const to = from + pageLimit - 1;
 
-    // ✅ Tạo query cơ bản
+    // ✅ 1. QUERY LẤY DỮ LIỆU PHÂN TRANG (Giữ nguyên logic cũ)
     let query = supabase
       .from("YeuCau")
       .select(
-        `
-        *,
-        ChiTietDichVu,
-        NguoiPhuTrach:User!YeuCau_NguoiPhuTrachId_fkey(
-          id,
-          name,
-          username,
-          email
-        )
-      `,
+        `*, ChiTietDichVu, NguoiPhuTrach:User!YeuCau_NguoiPhuTrachId_fkey(id, name, username, email)`,
         { count: "exact" }
       )
       .order("YeuCauID", { ascending: true }) 
       .range(from, to);
 
-  
+    // Áp dụng bộ lọc quyền hạn cho Query chính
     if (!canViewAll && userId) {
-      console.log("🔒 Restricted: Lọc theo NguoiPhuTrachId =", userId);
       query = query.eq("NguoiPhuTrachId", parseInt(userId, 10));
-    } else {
-      console.log("🔓 Full Access: Hiển thị toàn bộ danh sách");
     }
 
     const { data, count, error } = await query;
     if (error) throw error;
 
-  
-    const enrichedData = data; 
+    // ✅ 2. [MỚI] TÍNH TỔNG DOANH THU TOÀN BỘ (KHÔNG PHÂN TRANG)
+    // Tạo một query mới chỉ lấy cột DoanhThuSauChietKhau để tính tổng
+    let revenueQuery = supabase.from("YeuCau").select("DoanhThuSauChietKhau");
 
+    // Áp dụng CÙNG bộ lọc quyền hạn như trên
+    if (!canViewAll && userId) {
+      revenueQuery = revenueQuery.eq("NguoiPhuTrachId", parseInt(userId, 10));
+    }
+
+    const { data: revenueData, error: revenueError } = await revenueQuery;
+    
+    // Tính tổng bằng reduce
+    let totalRevenueAll = 0;
+    if (!revenueError && revenueData) {
+      totalRevenueAll = revenueData.reduce((sum, item) => sum + (item.DoanhThuSauChietKhau || 0), 0);
+    }
 
     const total = count ?? 0;
     const totalPages = Math.ceil(total / pageLimit);
 
     res.json({
       success: true,
-      data: enrichedData, 
+      data: data, 
       total,
       totalPages,
       currentPage: pageNum,
       perPage: pageLimit,
+      totalRevenue: totalRevenueAll,
     });
   } catch (err) {
     console.error("❌ Lỗi khi lấy danh sách YeuCau:", err);
