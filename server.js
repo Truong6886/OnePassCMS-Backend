@@ -2736,6 +2736,7 @@ app.delete("/api/yeucau/:id", async (req, res) => {
 
 
 
+
 app.put("/api/yeucau/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -2749,25 +2750,31 @@ app.put("/api/yeucau/:id", async (req, res) => {
         Vi,
         NgayBatDau,  
         NgayKetThuc,
-        NguoiPhuTrach,
+        NguoiPhuTrach, 
+        User,          
         ...restData     
     } = req.body;
 
-    let updatePayload = { ...restData, SoDienThoai,NgayBatDau: NgayBatDau || null,
-        NgayKetThuc: NgayKetThuc || null  }; 
+
+    let updatePayload = { 
+        ...restData, 
+        SoDienThoai,
+        NgayBatDau: NgayBatDau || null,
+        NgayKetThuc: NgayKetThuc || null 
+    }; 
   
+ 
     if (ChiTietDichVu || DoanhThuTruocChietKhau !== undefined) {
         let totalRevenue = 0;
         let totalDiscountAmt = 0;
         let details = ChiTietDichVu;
         
-
+      
         if (typeof details === 'string') {
             try { details = JSON.parse(details); } catch (e) { details = null; }
         }
 
         if (details && details.main) {
-           
             const mainRev = parseFloat(details.main.revenue) || 0;
             const mainDisc = parseFloat(details.main.discount) || 0;
             totalRevenue += mainRev;
@@ -2782,16 +2789,14 @@ app.put("/api/yeucau/:id", async (req, res) => {
                 });
             }
         } else if (DoanhThuTruocChietKhau !== undefined) {
-         
             totalRevenue = parseFloat(DoanhThuTruocChietKhau) || 0;
             const phanTram = parseFloat(MucChietKhau) || 0;
             totalDiscountAmt = (totalRevenue * phanTram) / 100;
         }
 
-     
         const currentNetRevenue = totalRevenue - totalDiscountAmt; 
 
-     
+
         let targetPhone = SoDienThoai;
         if (!targetPhone) {
              const { data: current } = await supabase.from("YeuCau").select("SoDienThoai").eq("YeuCauID", id).single();
@@ -2806,8 +2811,6 @@ app.put("/api/yeucau/:id", async (req, res) => {
                 .neq("YeuCauID", id); 
 
             const historyTotal = historyData?.reduce((sum, item) => sum + (item.DoanhThuSauChietKhau || 0), 0) ?? 0;
-            
-      
             updatePayload.TongDoanhThuTichLuy = historyTotal + currentNetRevenue;
         }
 
@@ -2815,19 +2818,22 @@ app.put("/api/yeucau/:id", async (req, res) => {
         updatePayload.DoanhThuTruocChietKhau = totalRevenue;
         updatePayload.SoTienChietKhau = totalDiscountAmt;
         updatePayload.DoanhThuSauChietKhau = currentNetRevenue;
-      
         updatePayload.MucChietKhau = totalRevenue > 0 ? (totalDiscountAmt / totalRevenue * 100) : 0;
     }
 
-  
+    
     for (const key of Object.keys(updatePayload)) {
       if (updatePayload[key] === "") updatePayload[key] = null;
     }
-    if (updatePayload.NguoiPhuTrachId) {
+
+  
+    if (updatePayload.NguoiPhuTrachId && String(updatePayload.NguoiPhuTrachId).trim() !== "") {
         updatePayload.NguoiPhuTrachId = parseInt(updatePayload.NguoiPhuTrachId);
+    } else {
+        updatePayload.NguoiPhuTrachId = null;
     }
 
-
+    // 4. Perform Update
     const { error: updateError } = await supabase
       .from("YeuCau")
       .update(updatePayload)
@@ -2835,6 +2841,7 @@ app.put("/api/yeucau/:id", async (req, res) => {
 
     if (updateError) throw updateError;
 
+    // 5. Return updated data
     const { data } = await supabase
       .from("YeuCau")
       .select(`*, ChiTietDichVu, NguoiPhuTrach:User!YeuCau_NguoiPhuTrachId_fkey(id, name)`)
