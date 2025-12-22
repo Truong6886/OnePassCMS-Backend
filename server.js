@@ -39,7 +39,6 @@ function translateServiceName(name) {
       "B2B 서비스": "Dịch vụ B2B",
       "기타": "Khác",
     };
-  // Nếu tìm thấy trong map thì trả về tiếng Việt, không thì giữ nguyên
   return map[name?.trim()] || name?.trim() || "";
 }
 
@@ -459,83 +458,169 @@ global.io = io;
 
 
 
+
+
+async function sendNotificationToApprovers(payload) {
+  if (!global.io) return;
+  try {
+    
+    const { data: approvers, error } = await supabase
+      .from("User")
+      .select("id")
+      .or("is_director.eq.true,perm_approve_b2c.eq.true");
+
+    if (error) {
+      console.error("❌ Lỗi lấy người duyệt:", error.message);
+      return;
+    }
+
+    if (approvers && approvers.length > 0) {
+      approvers.forEach((user) => {
+        const socketId = userSocketMap.get(String(user.id));
+        if (socketId) {
+     
+          global.io.to(socketId).emit("new_request", {
+             ...payload,
+             title: "Yêu cầu mới cần duyệt",
+             type: "needs_approval"
+          });
+          console.log(`📡 Đã gửi thông báo DUYỆT tới User ID ${user.id}`);
+        }
+      });
+    }
+  } catch (err) {
+    console.error("❌ Socket Error:", err);
+  }
+}
+async function sendNotificationToAdmins(payload) {
+  if (!global.io) return;
+  try {
+    // Lấy danh sách Admin
+    const { data: admins, error } = await supabase
+      .from("User")
+      .select("id")
+      .eq("is_admin", true);
+
+    if (error) {
+       console.error("❌ Lỗi lấy admin:", error.message);
+       return;
+    }
+
+    if (admins && admins.length > 0) {
+      admins.forEach((user) => {
+        const socketId = userSocketMap.get(String(user.id));
+        if (socketId) {
+          // Gửi sự kiện thông báo đã duyệt
+          global.io.to(socketId).emit("new_request", {
+            ...payload,
+             title: "Hồ sơ đã được duyệt & cấp mã",
+             type: "approved_done"
+          });
+          console.log(`📡 Đã gửi thông báo HOÀN THÀNH tới Admin ID ${user.id}`);
+        }
+      });
+    }
+  } catch (err) {
+    console.error("❌ Socket Error:", err);
+  }
+}
 app.put("/api/yeucau/approve/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    
-   
     const { 
-      userId, 
-      NguoiPhuTrachId,
-      HoTen, SoDienThoai, Email, MaVung,
-      LoaiDichVu, TenDichVu, GoiDichVu,
-      TenHinhThuc, CoSoTuVan,
-      ChonNgay, Gio, NoiDung, GhiChu,
-      DanhMuc,
-      DoanhThuTruocChietKhau, MucChietKhau, Vi 
+      userId, NguoiPhuTrachId, HoTen, SoDienThoai, Email, MaVung,
+      LoaiDichVu, TenDichVu, GoiDichVu, TenHinhThuc, CoSoTuVan,
+      ChonNgay, Gio, NoiDung, GhiChu, DanhMuc, ChiTietDichVu,NgayBatDau, 
+      NgayKetThuc
     } = req.body; 
 
-    // 2. Tính toán tài chính
-    const dtTruoc = parseInt(DoanhThuTruocChietKhau) || 0;
-    const phanTram = parseFloat(MucChietKhau) || 0;
-    const viTien = parseInt(Vi) || 0;
+    // --- 1. TÍNH TOÁN DOANH THU & CHIẾT KHẤU ---
+    let totalRevenue = 0;
+    let totalDiscountAmt = 0;
     
-    const tienChietKhau = Math.round((dtTruoc * phanTram) / 100);
-    const dtSau = dtTruoc - tienChietKhau - viTien; 
-
-    
-    const { data: currentReq, error: fetchError } = await supabase
-      .from("YeuCau")
-      .select("*")
-      .eq("YeuCauID", id)
-      .single();
-
-    if (fetchError || !currentReq) return res.status(404).json({ success: false, message: "Không tìm thấy yêu cầu" });
-
-  
-   let newServiceCode = currentReq.MaHoSo;
-
-    if (!newServiceCode || newServiceCode.length < 5) {
-         
-         newServiceCode = await generateB2CServiceCode(
-            supabase, 
-            LoaiDichVu || currentReq.LoaiDichVu, 
-            currentReq.Invoice,
-            DanhMuc || currentReq.DanhMuc 
-         );
+    let details = ChiTietDichVu;
+    if (typeof details === 'string') {
+        try { details = JSON.parse(details); } catch (e) { details = null; }
     }
+
+    if (details && details.main) {
+        const mainRev = parseFloat(details.main.revenue) || 0;
+        const mainDisc = parseFloat(details.main.discount) || 0;
+        totalRevenue += mainRev;
+        totalDiscountAmt += mainRev * (mainDisc / 100);
+
+        if (details.sub && Array.isArray(details.sub)) {
+            details.sub.forEach(sub => {
+                const subRev = parseFloat(sub.revenue) || 0;
+                const subDisc = parseFloat(sub.discount) || 0;
+                totalRevenue += subRev;
+                totalDiscountAmt += subRev * (subDisc / 100);
+            });
+        }
+    } else {
+        totalRevenue = parseInt(req.body.DoanhThuTruocChietKhau) || 0;
+        const phanTram = parseFloat(req.body.MucChietKhau) || 0;
+        totalDiscountAmt = Math.round((totalRevenue * phanTram) / 100);
+    }
+
+   
+    const currentNetRevenue = totalRevenue - totalDiscountAmt;
+
+    const { data: historyData } = await supabase
+        .from("YeuCau")
+        .select("DoanhThuSauChietKhau")
+        .eq("SoDienThoai", SoDienThoai)
+        .neq("YeuCauID", id); 
+
+    const historyTotal = historyData?.reduce((sum, item) => sum + (item.DoanhThuSauChietKhau || 0), 0) ?? 0;
+    const newTongDoanhThuTichLuy = historyTotal + currentNetRevenue;
+
+
+    const { data: currentReq } = await supabase.from("YeuCau").select("*").eq("YeuCauID", id).single();
+    let newServiceCode = currentReq.MaHoSo;
+    
+ 
+    if (!newServiceCode || newServiceCode.length < 5) {
+         newServiceCode = await generateB2CServiceCode(supabase, LoaiDichVu || currentReq.LoaiDichVu, currentReq.Invoice, DanhMuc || currentReq.DanhMuc);
+    }
+
 
     const { data: updatedData, error: updateError } = await supabase
       .from("YeuCau")
       .update({
-    
-        HoTen, SoDienThoai, Email, MaVung,
-        LoaiDichVu, TenDichVu, GoiDichVu,
-        TenHinhThuc, CoSoTuVan,
-        ChonNgay, Gio, NoiDung, GhiChu,
-
-        DanhMuc: DanhMuc,
+        HoTen, SoDienThoai, Email, MaVung, LoaiDichVu, TenDichVu, GoiDichVu,
+        TenHinhThuc, CoSoTuVan, ChonNgay, Gio, NoiDung, GhiChu, DanhMuc,
         MaHoSo: newServiceCode,
-       
-        NguoiPhuTrachId: NguoiPhuTrachId || userId, 
-        
-      
-        DoanhThuTruocChietKhau: dtTruoc,
-        MucChietKhau: phanTram,
-        SoTienChietKhau: tienChietKhau,
-        DoanhThuSauChietKhau: dtSau,
-        Vi: viTien
+        NguoiPhuTrachId: NguoiPhuTrachId || userId,
+        ChiTietDichVu: details,
+        DoanhThuTruocChietKhau: totalRevenue,
+        MucChietKhau: totalRevenue > 0 ? (totalDiscountAmt / totalRevenue * 100) : 0,
+        SoTienChietKhau: totalDiscountAmt,
+        DoanhThuSauChietKhau: currentNetRevenue,
+        TongDoanhThuTichLuy: newTongDoanhThuTichLuy,
+        NgayBatDau: NgayBatDau || null, 
+        NgayKetThuc: NgayKetThuc || null 
       })
       .eq("YeuCauID", id)
-      .select()
-      .single();
+      .select().single();
 
     if (updateError) throw updateError;
+
+    if (global.io) {
+        const adminPayload = {
+            YeuCauID: id,
+            HoTen: HoTen || currentReq.HoTen, 
+            MaHoSo: newServiceCode,     
+            ThoiGian: new Date().toISOString(),
+        };
+        await sendNotificationToAdmins(adminPayload);
+        console.log(`📡 Đã gửi thông báo duyệt hồ sơ ${newServiceCode} tới Admin`);
+    }
 
     res.json({ success: true, message: `Duyệt thành công. Mã: ${newServiceCode}`, data: updatedData });
 
   } catch (err) {
-    console.error("❌ Approve Error:", err);
+    console.error("❌ Lỗi duyệt yêu cầu:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -1914,7 +1999,7 @@ app.get("/api/b2b/services", async (req, res) => {
     if (DoanhNghiepID) query = query.eq("DoanhNghiepID", DoanhNghiepID);
 
     const { data, count, error } = await query
-      .order("STT", { ascending: false })
+      .order("STT", { ascending: true })
       .range(from, to);
 
     if (error) throw error;
@@ -1935,14 +2020,12 @@ app.get("/api/b2b/services", async (req, res) => {
       NgayHoanThanh: item.NgayHoanThanh,
       DoanhThuTruocChietKhau: item.DoanhThuTruocChietKhau,
       MucChietKhau: item.MucChietKhau,
-      DanhMuc: item.DanhMuc || "",
       SoTienChietKhau: item.SoTienChietKhau,
       DoanhThuSauChietKhau: item.DoanhThuSauChietKhau,
       TongDoanhThuTichLuy: item.TongDoanhThuTichLuy,
       Vi: item.Vi,
-      NguoiPhuTrachId: item.NguoiPhuTrachId,
-      
-      
+      ChiTietDichVu: item.ChiTietDichVu,
+      NguoiPhuTrachId: item.NguoiPhuTrachId,      
       NguoiPhuTrach: item.NguoiPhuTrach || null, 
       NguoiPhuTrachName: item.NguoiPhuTrach ? item.NguoiPhuTrach.name : "" 
       // --------------------
@@ -2722,57 +2805,127 @@ app.delete("/api/yeucau/:id", async (req, res) => {
 });
 
 
+
+
 app.put("/api/yeucau/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    let updateData = req.body;
+    const { 
+        autoApprove,      
+        ConfirmPassword, 
+        ChiTietDichVu,
+        SoDienThoai, 
+        DoanhThuTruocChietKhau,
+        MucChietKhau, 
+        Vi,
+        NgayBatDau,  
+        NgayKetThuc,
+        NguoiPhuTrach, 
+        User,          
+        ...restData     
+    } = req.body;
 
-    console.log("📝 Cập nhật yêu cầu (trước khi xử lý):", { id, updateData });
-    for (const key of Object.keys(updateData)) {
-      if (updateData[key] === "") updateData[key] = null;
+
+    let updatePayload = { 
+        ...restData, 
+        SoDienThoai,
+        NgayBatDau: NgayBatDau || null,
+        NgayKetThuc: NgayKetThuc || null 
+    }; 
+  
+ 
+    if (ChiTietDichVu || DoanhThuTruocChietKhau !== undefined) {
+        let totalRevenue = 0;
+        let totalDiscountAmt = 0;
+        let details = ChiTietDichVu;
+        
+      
+        if (typeof details === 'string') {
+            try { details = JSON.parse(details); } catch (e) { details = null; }
+        }
+
+        if (details && details.main) {
+            const mainRev = parseFloat(details.main.revenue) || 0;
+            const mainDisc = parseFloat(details.main.discount) || 0;
+            totalRevenue += mainRev;
+            totalDiscountAmt += mainRev * (mainDisc / 100);
+
+            if (details.sub && Array.isArray(details.sub)) {
+                details.sub.forEach(sub => {
+                    const subRev = parseFloat(sub.revenue) || 0;
+                    const subDisc = parseFloat(sub.discount) || 0;
+                    totalRevenue += subRev;
+                    totalDiscountAmt += subRev * (subDisc / 100);
+                });
+            }
+        } else if (DoanhThuTruocChietKhau !== undefined) {
+            totalRevenue = parseFloat(DoanhThuTruocChietKhau) || 0;
+            const phanTram = parseFloat(MucChietKhau) || 0;
+            totalDiscountAmt = (totalRevenue * phanTram) / 100;
+        }
+
+        const currentNetRevenue = totalRevenue - totalDiscountAmt; 
+
+
+        let targetPhone = SoDienThoai;
+        if (!targetPhone) {
+             const { data: current } = await supabase.from("YeuCau").select("SoDienThoai").eq("YeuCauID", id).single();
+             targetPhone = current?.SoDienThoai;
+        }
+
+        if (targetPhone) {
+            const { data: historyData } = await supabase
+                .from("YeuCau")
+                .select("DoanhThuSauChietKhau")
+                .eq("SoDienThoai", targetPhone)
+                .neq("YeuCauID", id); 
+
+            const historyTotal = historyData?.reduce((sum, item) => sum + (item.DoanhThuSauChietKhau || 0), 0) ?? 0;
+            updatePayload.TongDoanhThuTichLuy = historyTotal + currentNetRevenue;
+        }
+
+        updatePayload.ChiTietDichVu = details;
+        updatePayload.DoanhThuTruocChietKhau = totalRevenue;
+        updatePayload.SoTienChietKhau = totalDiscountAmt;
+        updatePayload.DoanhThuSauChietKhau = currentNetRevenue;
+        updatePayload.MucChietKhau = totalRevenue > 0 ? (totalDiscountAmt / totalRevenue * 100) : 0;
     }
 
-    // Nếu có NguoiPhuTrachId thì ép kiểu về integer, hoặc null nếu không hợp lệ
-    if (updateData.NguoiPhuTrachId !== null && updateData.NguoiPhuTrachId !== undefined) {
-      const parsed = parseInt(updateData.NguoiPhuTrachId, 10);
-      updateData.NguoiPhuTrachId = isNaN(parsed) ? null : parsed;
+    
+    for (const key of Object.keys(updatePayload)) {
+      if (updatePayload[key] === "") updatePayload[key] = null;
     }
 
-    console.log("🧹 Dữ liệu sau khi chuẩn hóa:", updateData);
+  
+    if (updatePayload.NguoiPhuTrachId && String(updatePayload.NguoiPhuTrachId).trim() !== "") {
+        updatePayload.NguoiPhuTrachId = parseInt(updatePayload.NguoiPhuTrachId);
+    } else {
+        updatePayload.NguoiPhuTrachId = null;
+    }
 
-    // Cập nhật trước
+    // 4. Perform Update
     const { error: updateError } = await supabase
       .from("YeuCau")
-      .update(updateData)
+      .update(updatePayload)
       .eq("YeuCauID", id);
 
     if (updateError) throw updateError;
 
-    const { data, error } = await supabase
+    // 5. Return updated data
+    const { data } = await supabase
       .from("YeuCau")
-      .select(`
-        *,
-        NguoiPhuTrach:User!YeuCau_NguoiPhuTrachId_fkey(
-          id,
-          name,
-          username,
-          email
-        )
-      `)
+      .select(`*, ChiTietDichVu, NguoiPhuTrach:User!YeuCau_NguoiPhuTrachId_fkey(id, name)`)
       .eq("YeuCauID", id)
       .single();
 
-    if (error) throw error;
-
-    console.log("✅ Đã cập nhật và lấy lại dữ liệu:", data);
     res.json({ success: true, data });
+
   } catch (err) {
-    console.error("❌ Lỗi cập nhật yêu cầu:", err);
+    console.error("❌ Update Error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// [MỚI] API Lấy danh sách doanh nghiệp bị từ chối (B2B_REJECTED)
 app.get("/api/b2b/reject", async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -2927,53 +3080,58 @@ app.get("/api/yeucau", async (req, res) => {
     const from = (pageNum - 1) * pageLimit;
     const to = from + pageLimit - 1;
 
-    // ✅ Tạo query cơ bản
+    // ✅ 1. QUERY LẤY DỮ LIỆU PHÂN TRANG (Giữ nguyên logic cũ)
     let query = supabase
       .from("YeuCau")
       .select(
-        `
-        *,
-        NguoiPhuTrach:User!YeuCau_NguoiPhuTrachId_fkey(
-          id,
-          name,
-          username,
-          email
-        )
-      `,
+        `*, ChiTietDichVu, NguoiPhuTrach:User!YeuCau_NguoiPhuTrachId_fkey(id, name, username, email)`,
         { count: "exact" }
       )
       .order("YeuCauID", { ascending: true }) 
       .range(from, to);
 
-  
+    // Áp dụng bộ lọc quyền hạn cho Query chính
     if (!canViewAll && userId) {
-      console.log("🔒 Restricted: Lọc theo NguoiPhuTrachId =", userId);
       query = query.eq("NguoiPhuTrachId", parseInt(userId, 10));
-    } else {
-      console.log("🔓 Full Access: Hiển thị toàn bộ danh sách");
     }
 
     const { data, count, error } = await query;
     if (error) throw error;
+
+    // ✅ 2. [MỚI] TÍNH TỔNG DOANH THU TOÀN BỘ (KHÔNG PHÂN TRANG)
+    // Tạo một query mới chỉ lấy cột DoanhThuSauChietKhau để tính tổng
+    let revenueQuery = supabase.from("YeuCau").select("DoanhThuSauChietKhau");
+
+    // Áp dụng CÙNG bộ lọc quyền hạn như trên
+    if (!canViewAll && userId) {
+      revenueQuery = revenueQuery.eq("NguoiPhuTrachId", parseInt(userId, 10));
+    }
+
+    const { data: revenueData, error: revenueError } = await revenueQuery;
+    
+    // Tính tổng bằng reduce
+    let totalRevenueAll = 0;
+    if (!revenueError && revenueData) {
+      totalRevenueAll = revenueData.reduce((sum, item) => sum + (item.DoanhThuSauChietKhau || 0), 0);
+    }
 
     const total = count ?? 0;
     const totalPages = Math.ceil(total / pageLimit);
 
     res.json({
       success: true,
-      data,
+      data: data, 
       total,
       totalPages,
       currentPage: pageNum,
       perPage: pageLimit,
+      totalRevenue: totalRevenueAll,
     });
   } catch (err) {
     console.error("❌ Lỗi khi lấy danh sách YeuCau:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
-
-
 app.post("/api/verify-password", async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -3164,9 +3322,7 @@ app.post("/api/tuvan", async (req, res) => {
       console.error("❌ Lỗi gửi email admin:", emailErr);
     }
 
-    if (global.io) {
-      global.io.emit("new_request", fullRecord);
-    }
+    await sendNotificationToApprovers(fullRecord);
 
     return res.json({
       success: true,
@@ -3192,43 +3348,40 @@ app.post("/api/yeucau", async (req, res) => {
         ConfirmPassword,
         DoanhThuTruocChietKhau, 
         MucChietKhau, 
+        ChiTietDichVu,
+        NgayBatDau, 
+        NgayKetThuc,
         ...restData 
     } = req.body;
 
-    let newRequestData = { ...restData };
-
-
-    delete newRequestData.Vi;
+    let newRequestData = { ...restData, ChiTietDichVu,NgayBatDau: NgayBatDau || null, 
+        NgayKetThuc: NgayKetThuc || null };
 
     console.log("[CMS] Tạo yêu cầu mới. AutoApprove:", autoApprove);
 
-
+    // Xử lý dữ liệu rỗng
     for (const key of Object.keys(newRequestData)) {
       if (newRequestData[key] === "" || newRequestData[key] === undefined) {
         newRequestData[key] = null;
       }
     }
     
-    
     if (newRequestData.NguoiPhuTrachId) {
       newRequestData.NguoiPhuTrachId = parseInt(newRequestData.NguoiPhuTrachId, 10) || null;
     }
  
     if (!newRequestData.NgayTao) newRequestData.NgayTao = new Date().toISOString();
-
-   
     if (autoApprove === true || autoApprove === "true") {
         // a. Tính toán tài chính
         const dtTruoc = parseInt(DoanhThuTruocChietKhau) || 0;
         const phanTram = parseFloat(MucChietKhau) || 0;
         
-   
         const tienChietKhau = Math.round((dtTruoc * phanTram) / 100);
         
-     
+      
         const dtSau = dtTruoc - tienChietKhau; 
 
-  
+        
         const newCode = await generateB2CServiceCode(
             supabase, 
             newRequestData.LoaiDichVu, 
@@ -3236,19 +3389,18 @@ app.post("/api/yeucau", async (req, res) => {
             newRequestData.DanhMuc
         );
 
-     
+  
         newRequestData.MaHoSo = newCode;
         newRequestData.DoanhThuTruocChietKhau = dtTruoc;
         newRequestData.MucChietKhau = phanTram;
         newRequestData.SoTienChietKhau = tienChietKhau;
         newRequestData.DoanhThuSauChietKhau = dtSau;
         
-     
         if (!newRequestData.NguoiPhuTrachId && currentUserId) {
             newRequestData.NguoiPhuTrachId = parseInt(currentUserId);
         }
     } else {
-
+        // Nếu không auto approve thì reset về 0
         newRequestData.DoanhThuTruocChietKhau = 0;
         newRequestData.DoanhThuSauChietKhau = 0;
         newRequestData.SoTienChietKhau = 0;
