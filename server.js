@@ -2999,7 +2999,7 @@ app.get("/api/yeucau", async (req, res) => {
 
     const hasRole = (val) => val === true || val === "true";
 
-    // Xác định quyền xem tất cả
+
     const canViewAll = 
       hasRole(is_admin) || 
       hasRole(is_director) || 
@@ -3010,7 +3010,7 @@ app.get("/api/yeucau", async (req, res) => {
     const from = (pageNum - 1) * pageLimit;
     const to = from + pageLimit - 1;
 
-    // ✅ 1. QUERY LẤY DỮ LIỆU PHÂN TRANG (Giữ nguyên logic cũ)
+
     let query = supabase
       .from("YeuCau")
       .select(
@@ -3020,7 +3020,7 @@ app.get("/api/yeucau", async (req, res) => {
       .order("YeuCauID", { ascending: true }) 
       .range(from, to);
 
-    // Áp dụng bộ lọc quyền hạn cho Query chính
+   
     if (!canViewAll && userId) {
       query = query.eq("NguoiPhuTrachId", parseInt(userId, 10));
     }
@@ -3028,8 +3028,7 @@ app.get("/api/yeucau", async (req, res) => {
     const { data, count, error } = await query;
     if (error) throw error;
 
-    // ✅ 2. [MỚI] TÍNH TỔNG DOANH THU TOÀN BỘ (KHÔNG PHÂN TRANG)
-    // Tạo một query mới chỉ lấy cột DoanhThuSauChietKhau để tính tổng
+ 
     let revenueQuery = supabase.from("YeuCau").select("DoanhThuSauChietKhau");
 
     // Áp dụng CÙNG bộ lọc quyền hạn như trên
@@ -3059,6 +3058,58 @@ app.get("/api/yeucau", async (req, res) => {
     });
   } catch (err) {
     console.error("❌ Lỗi khi lấy danh sách YeuCau:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+app.post("/api/upload-b2b-doc", upload.array("files", 10), async (req, res) => {
+  try {
+    const files = req.files;
+    if (!files || files.length === 0) {
+      return res.status(400).json({ success: false, message: "Vui lòng chọn ít nhất 1 file" });
+    }
+
+    const uploadedUrls = [];
+
+    for (const file of files) {
+      // Tạo tên file unique (giữ nguyên tên gốc để dễ nhìn, thêm timestamp)
+      // Chuyển tên file sang không dấu để tránh lỗi Supabase
+      const originalName = getInitials(file.originalname) || "file"; 
+      const fileExt = file.originalname.split(".").pop();
+      const fileName = `doc_${Date.now()}_${Math.round(Math.random() * 1000)}.${fileExt}`;
+
+      // Upload vào bucket "hosob2b"
+      // LƯU Ý: Bạn cần tạo bucket "hosob2b" trên Supabase và set Public
+      const { error } = await supabase.storage
+        .from("hosob2b") 
+        .upload(fileName, file.buffer, {
+          contentType: file.mimetype,
+          upsert: false,
+        });
+
+      if (error) throw error;
+
+      // Lấy Public URL
+      const { data: publicUrlData } = supabase.storage
+        .from("hosob2b")
+        .getPublicUrl(fileName);
+
+      if (publicUrlData && publicUrlData.publicUrl) {
+        uploadedUrls.push({
+            name: file.originalname,
+            url: publicUrlData.publicUrl,
+            type: file.mimetype
+        });
+      }
+    }
+
+    res.json({ 
+      success: true, 
+      message: "Upload hồ sơ thành công", 
+      data: uploadedUrls 
+    });
+
+  } catch (err) {
+    console.error("❌ Lỗi upload Hồ sơ B2B:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
