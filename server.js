@@ -11,6 +11,7 @@ import fetch from "node-fetch";
 import nodemailer from "nodemailer";
 import emailjs from '@emailjs/nodejs';
 import crypto from "crypto";
+import path from "path";
 dotenv.config();
 function getInitials(str) {
   if (!str) return "";
@@ -362,6 +363,23 @@ const upload = multer({
     fileSize: 5 * 1024 * 1024, // 5MB limit
   }
 });
+// Dùng bucket đã có sẵn để tránh lỗi thiếu bucket (mặc định dùng "invoice").
+const NEWS_BUCKET = process.env.NEWS_BUCKET || "invoice";
+
+// Ensure bucket exists (idempotent)
+const ensureBucket = async (bucket) => {
+  const { data: bucketData, error: bucketError } = await supabase.storage.getBucket(bucket);
+  if (bucketData) return bucketData;
+  if (bucketError && bucketError.statusCode !== 404) throw bucketError;
+
+  const { data, error } = await supabase.storage.createBucket(bucket, { public: true });
+  if (error) {
+    console.error("❌ Tạo bucket thất bại:", error);
+    throw error;
+  }
+  console.log(`✅ Đã tạo bucket mới: ${bucket}`);
+  return data;
+};
 
 // ==== Helper: handle supabase errors ====
 const handleSupabaseError = (error) => {
@@ -738,6 +756,58 @@ app.post("/api/upload-invoice", upload.single("file"), async (req, res) => {
 
   } catch (err) {
     console.error("❌ Lỗi upload Invoice:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+app.post("/api/upload-news-image", upload.single("file"), async (req, res) => {
+  try {
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({ success: false, message: "Vui lòng chọn file" });
+    }
+
+    // Ensure bucket exists (dùng bucket mặc định đã có sẵn)
+    try {
+      await ensureBucket(NEWS_BUCKET);
+    } catch (bucketErr) {
+      console.error("❌ Không tạo/đọc được bucket:", bucketErr);
+      return res.status(500).json({ success: false, message: bucketErr.message || "Bucket error" });
+    }
+
+    const sanitizedName = (file.originalname || "news-image")
+      .replace(/\s+/g, "-")
+      .replace(/[^a-zA-Z0-9.-]/g, "");
+    const fileExt = path.extname(sanitizedName) || "";
+    const baseName = sanitizedName.replace(fileExt, "") || "news-image";
+    const uniqueName = `${baseName}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const filePath = `${uniqueName}${fileExt}`;
+
+    const { error } = await supabase.storage
+      .from(NEWS_BUCKET)
+      .upload(filePath, file.buffer, {
+        contentType: file.mimetype,
+        upsert: false,
+      });
+
+    if (error) throw error;
+
+    const { data: publicUrlData } = supabase.storage
+      .from(NEWS_BUCKET)
+      .getPublicUrl(filePath);
+
+    if (!publicUrlData || !publicUrlData.publicUrl) {
+      throw new Error("Không lấy được đường dẫn file");
+    }
+
+    res.json({
+      success: true,
+      message: "Upload thành công",
+      url: publicUrlData.publicUrl,
+      path: filePath,
+    });
+
+  } catch (err) {
+    console.error("❌ Lỗi upload ảnh tin tức:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -3681,6 +3751,249 @@ app.post("/api/save-email", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+// ================== TIN TỨC (NEWS) API ==================
+// GET all news
+app.get("/api/tintuc", async (req, res) => {
+  try {
+    const { page = 1, limit = 20, search = "" } = req.query;
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+    const from = (pageNum - 1) * limitNum;
+    const to = from + limitNum - 1;
+
+    let query = supabase
+      .from("TinTuc")
+      .select("*", { count: "exact" });
+
+    // Search by title (Vietnamese or Korean)
+    if (search && search.trim()) {
+      query = query.or(`TieuDeVN.ilike.%${search}%,TieuDeKR.ilike.%${search}%,DanhMuc.ilike.%${search}%`);
+    }
+
+    const { data, count, error } = await query
+      .order("ID", { ascending: false })
+      .range(from, to);
+
+    if (error) throw error;
+
+    res.json({
+      success: true,
+      data: data || [],
+      total: count || 0,
+      page: pageNum,
+      totalPages: Math.ceil((count || 0) / limitNum)
+    });
+  } catch (err) {
+    console.error("❌ Lỗi lấy danh sách tin tức:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// POST new news
+app.post("/api/tintuc", async (req, res) => {
+  try {
+    console.log("📝 [POST /api/tintuc] Nhận request:", req.body);
+    
+    const {
+      TieuDeVN,
+      TieuDeKR,
+      DanhMuc,
+      TacGia,
+      NgayXuatBan,
+      UrlHinhAnh,
+      NoiDungVN,
+      NoiDungKR
+    } = req.body;
+
+    console.log("🔍 Kiểm tra dữ liệu:", { TieuDeVN, TieuDeKR, NoiDungVN, NoiDungKR });
+
+    // Validation
+    if (!TieuDeVN || !TieuDeKR || !NoiDungVN || !NoiDungKR) {
+      console.error("❌ Validation failed - Missing required fields");
+      return res.status(400).json({
+        success: false,
+        message: "Vui lòng điền đầy đủ các trường bắt buộc (Tiêu đề VN, Tiêu đề KR, Nội dung VN, Nội dung KR)"
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("TinTuc")
+      .insert([
+        {
+          TieuDeVN: TieuDeVN.trim(),
+          TieuDeKR: TieuDeKR.trim(),
+          DanhMuc: DanhMuc || "",
+          TacGia: TacGia || "",
+          NgayXuatBan: NgayXuatBan || new Date().toISOString().split("T")[0],
+          UrlHinhAnh: UrlHinhAnh || "",
+          NoiDungVN: NoiDungVN.trim(),
+          NoiDungKR: NoiDungKR.trim(),
+          NgayTao: new Date().toISOString()
+        }
+      ])
+      .select()
+      .single();
+
+    if (error) {
+      console.error("❌ Supabase error:", error);
+      throw error;
+    }
+
+    console.log("✅ Tin tức được tạo thành công:", data);
+
+    try {
+      io.emit("news-changed", { action: "create", data });
+    } catch (emitErr) {
+      console.error("⚠️ Không emit được news-changed (create):", emitErr);
+    }
+
+    res.json({
+      success: true,
+      message: "Thêm tin tức thành công",
+      data
+    });
+  } catch (err) {
+    console.error("❌ Lỗi thêm tin tức:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// PUT update news
+app.put("/api/tintuc/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      TieuDeVN,
+      TieuDeKR,
+      DanhMuc,
+      TacGia,
+      NgayXuatBan,
+      UrlHinhAnh,
+      NoiDungVN,
+      NoiDungKR
+    } = req.body;
+
+    console.log("📝 [PUT /api/tintuc/:id] Nhận request update:", { id, body: req.body });
+
+    // Validation
+    if (!TieuDeVN || !TieuDeKR || !NoiDungVN || !NoiDungKR) {
+      console.error("❌ Validation failed - Missing required fields");
+      return res.status(400).json({
+        success: false,
+        message: "Vui lòng điền đầy đủ các trường bắt buộc"
+      });
+    }
+
+    const updateData = {
+      TieuDeVN: TieuDeVN.trim(),
+      TieuDeKR: TieuDeKR.trim(),
+      DanhMuc: DanhMuc || "",
+      TacGia: TacGia || "",
+      NgayXuatBan: NgayXuatBan || new Date().toISOString().split("T")[0],
+      UrlHinhAnh: UrlHinhAnh || "",
+      NoiDungVN: NoiDungVN.trim(),
+      NoiDungKR: NoiDungKR.trim()
+    };
+
+    console.log("📊 Update data:", updateData);
+
+    const { data, error } = await supabase
+      .from("TinTuc")
+      .update(updateData)
+      .eq("ID", id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("❌ Supabase error:", error);
+      throw error;
+    }
+
+    console.log("✅ Tin tức được cập nhật thành công:", data);
+
+    try {
+      io.emit("news-changed", { action: "update", data });
+    } catch (emitErr) {
+      console.error("⚠️ Không emit được news-changed (update):", emitErr);
+    }
+
+    res.json({
+      success: true,
+      message: "Cập nhật tin tức thành công",
+      data
+    });
+  } catch (err) {
+    console.error("❌ Lỗi cập nhật tin tức:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// DELETE news
+app.delete("/api/tintuc/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { error } = await supabase
+      .from("TinTuc")
+      .delete()
+      .eq("ID", id);
+
+    if (error) throw error;
+
+    try {
+      io.emit("news-changed", { action: "delete", id: Number(id) });
+    } catch (emitErr) {
+      console.error("⚠️ Không emit được news-changed (delete):", emitErr);
+    }
+
+    res.json({
+      success: true,
+      message: "Xóa tin tức thành công"
+    });
+  } catch (err) {
+    console.error("❌ Lỗi xóa tin tức:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ========== TRANSLATION API ==========
+app.post("/api/translate", async (req, res) => {
+  try {
+    const { text, sourceLang, targetLang } = req.body;
+
+    if (!text || !sourceLang || !targetLang) {
+      return res.status(400).json({
+        success: false,
+        message: "Thiếu thông tin: text, sourceLang, targetLang"
+      });
+    }
+
+    // Sử dụng Google Translate API miễn phí thông qua translate-google module
+    // Hoặc có thể dùng API khác như MyMemory, LibreTranslate
+    const translate = require('@vitalets/google-translate-api');
+    
+    const result = await translate(text, { 
+      from: sourceLang, 
+      to: targetLang 
+    });
+
+    res.json({
+      success: true,
+      translatedText: result.text,
+      originalText: text
+    });
+
+  } catch (err) {
+    console.error("❌ Lỗi dịch:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: "Lỗi dịch văn bản: " + err.message 
+    });
+  }
+});
+
+// ========================================================
+
 app.get("/api/health", (req, res) => {
   res.json({ 
     success: true, 
