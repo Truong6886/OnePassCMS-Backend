@@ -2002,7 +2002,7 @@ app.get("/api/b2b/services", async (req, res) => {
 
     let query = supabase
       .from("B2B_SERVICES")
-      // JOIN thêm bảng B2B_APPROVED để lấy SoDKKD
+    
      .select(`
         *,
         DoanhNghiep:B2B_APPROVED (SoDKKD, TenDoanhNghiep),
@@ -2040,8 +2040,8 @@ app.get("/api/b2b/services", async (req, res) => {
       ChiTietDichVu: item.ChiTietDichVu,
       NguoiPhuTrachId: item.NguoiPhuTrachId,      
       NguoiPhuTrach: item.NguoiPhuTrach || null, 
-      NguoiPhuTrachName: item.NguoiPhuTrach ? item.NguoiPhuTrach.name : "" 
-      // --------------------
+      NguoiPhuTrachName: item.NguoiPhuTrach ? item.NguoiPhuTrach.name : "",
+      TrangThai: item.TrangThai
     }));
 
     res.json({
