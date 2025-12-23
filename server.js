@@ -1499,26 +1499,40 @@ app.post("/api/User", async (req, res) => {
       ChucDanh, PhongBan, MaVung, SoDienThoai, NgayVaoLam, LoaiHopDong, CV
     } = req.body;
     
+  
     if (!username || !password) {
       return res.status(400).json({ success: false, message: "Thiếu tên đăng nhập hoặc mật khẩu" });
     }
 
+    const { data: existingUsername } = await supabase
+      .from("User")
+      .select("id")
+      .eq("username", username)
+      .maybeSingle();
+
+    if (existingUsername) {
+      return res.status(400).json({ success: false, message: "Tên đăng nhập này đã tồn tại, vui lòng chọn tên khác!" });
+    }
+    // --------------------------------------
+
     const emailValue = email && email.trim() !== "" ? email.trim() : null;
 
-    // Check trùng email
+
     if (emailValue) {
-      const { data: existingUser } = await supabase
+      const { data: existingEmail } = await supabase
         .from("User")
         .select("id")
         .eq("email", emailValue)
         .maybeSingle();
-      if (existingUser) {
+      if (existingEmail) {
         return res.status(400).json({ success: false, message: "Email này đã được sử dụng!" });
       }
     }
 
+    // 3. Mã hóa mật khẩu
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    // 4. Thêm vào DB
     const { data, error } = await supabase
       .from("User")
       .insert([{ 
@@ -1541,9 +1555,8 @@ app.post("/api/User", async (req, res) => {
 
     if (error) throw error;
     
-  
     const createdUser = data[0];
-    delete createdUser.password_hash;
+    delete createdUser.password_hash; // Xóa hash pass trước khi trả về client
 
     res.json({ success: true, message: "Tạo nhân viên thành công", data: createdUser });
   } catch (err) {
@@ -2075,7 +2088,8 @@ app.post("/api/b2b/services", async (req, res) => {
       NgayHoanThanh, YeuCauHoaDon, InvoiceUrl, 
       GhiChu, NguoiPhuTrachId, GoiDichVu,
       DoanhThuTruocChietKhau, Vi, MucChietKhau,
-      approveAction, userId, ChiTietDichVu
+      approveAction, userId, ChiTietDichVu, 
+      TrangThai 
     } = req.body;
 
     if (!DoanhNghiepID || !LoaiDichVu) {
@@ -2084,19 +2098,17 @@ app.post("/api/b2b/services", async (req, res) => {
 
     const dtTruoc = DoanhThuTruocChietKhau ? parseInt(DoanhThuTruocChietKhau) : 0;
     const viTien = Vi ? parseInt(Vi) : 0;
-    
-   
     const phanTramCK = MucChietKhau ? parseFloat(MucChietKhau) : 0; 
-    
     const tienCK = Math.round((dtTruoc * phanTramCK) / 100);
     const dtSau = dtTruoc - tienCK - viTien;
 
-
     let finalServiceCode = null;
-    let finalStatus = "Chờ Kế toán duyệt"; 
+
+
+    let finalStatus = TrangThai; 
     
+
     if (approveAction === "accountant_approve") {
-        // Kiểm tra quyền của userId
         if (userId) {
             const { data: userCheck } = await supabase
                 .from("User")
@@ -2104,10 +2116,9 @@ app.post("/api/b2b/services", async (req, res) => {
                 .eq("id", userId)
                 .single();
             
-         
             if (userCheck && (userCheck.is_director || userCheck.perm_approve_b2b )) {
                 
-      
+                // Trừ tiền ví nếu có
                 if (viTien > 0) {
                     const { data: approvedEnt } = await supabase
                         .from("B2B_APPROVED")
@@ -2120,24 +2131,23 @@ app.post("/api/b2b/services", async (req, res) => {
                         return res.status(400).json({ success: false, message: `Số dư ví không đủ để duyệt ngay (Hiện có: ${soDuHienTai})` });
                     }
                     
-                    // Trừ ví
                     await supabase.from("B2B_APPROVED")
                         .update({ SoDuVi: soDuHienTai - viTien })
                         .eq("ID", DoanhNghiepID);
                 }
+
+           
                 finalServiceCode = await generateServiceCode(
                     supabase,
                     LoaiDichVu,
                     YeuCauHoaDon,
                     DanhMuc || ""
                 );
-                
-                finalStatus = "Đã duyệt"; 
             }
         }
     }
 
-    // 3. Insert vào DB
+    // Insert vào DB
     const { data, error } = await supabase
       .from("B2B_SERVICES")
       .insert([{
@@ -2160,13 +2170,13 @@ app.post("/api/b2b/services", async (req, res) => {
         Vi: viTien,
         ChiTietDichVu: ChiTietDichVu || null,
         
+        TrangThai: finalStatus,
         CreatedAt: new Date().toISOString()
       }])
       .select()
       .single();
 
     if (error) throw error;
-
 
     res.json({ success: true, data, newCode: finalServiceCode });
 
@@ -2195,7 +2205,8 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
         NguoiPhuTrachId, 
         approveAction, 
         userId,
-        ChiTietDichVu
+        ChiTietDichVu, 
+        TrangThai
     } = req.body;
 
     // Lấy thông tin hiện tại
@@ -2344,7 +2355,7 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
       ServiceID: finalMaDichVu,
       NgayThucHien: NgayThucHien || current.NgayThucHien,
       NgayHoanThanh: NgayHoanThanh || current.NgayHoanThanh,
-      
+      TrangThai: TrangThai || current.TrangThai,
 
       DoanhThuTruocChietKhau: req.body.DoanhThuTruocChietKhau ?? current.DoanhThuTruocChietKhau,
       DoanhThuSauChietKhau: req.body.DoanhThuSauChietKhau ?? current.DoanhThuSauChietKhau,
