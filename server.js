@@ -2027,6 +2027,7 @@ app.get("/api/b2b/services", async (req, res) => {
       MaDichVu: item.ServiceID,
       LoaiDichVu: item.LoaiDichVu,
       TenDichVu: item.TenDichVu,
+      DiaChiNhan: item.DiaChiNhan || "",
       GoiDichVu: item.GoiDichVu || "", 
       YeuCauHoaDon: item.YeuCauHoaDon || "",     
       InvoiceUrl: item.InvoiceUrl || "",           
