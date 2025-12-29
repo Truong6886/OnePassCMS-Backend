@@ -2948,7 +2948,7 @@ app.get("/api/b2b/reject", async (req, res) => {
     const { data, count, error } = await supabase
       .from("B2B_REJECTED")
       .select("*", { count: "exact" })
-      .order("ID", { ascending: false }) // Sắp xếp mới nhất lên đầu
+      .order("ID", { ascending: true }) // Sắp xếp mới nhất lên đầu
       .range(from, to);
 
     if (error) throw error;
@@ -3522,7 +3522,7 @@ app.get("/api/doanhthu", async (req, res) => {
     const { data, error } = await supabase
       .from("DoanhThu")
       .select("*")
-      .order("Ngay", { ascending: false });
+      .order("Ngay", { ascending: true });
 
     if (error) throw error;
 
