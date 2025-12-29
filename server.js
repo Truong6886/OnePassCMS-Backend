@@ -2012,7 +2012,7 @@ app.get("/api/b2b/services", async (req, res) => {
     if (DoanhNghiepID) query = query.eq("DoanhNghiepID", DoanhNghiepID);
 
     const { data, count, error } = await query
-      .order("STT", { ascending: true })
+      .order("STT", { ascending: false })
       .range(from, to);
 
     if (error) throw error;
@@ -3098,7 +3098,7 @@ app.get("/api/yeucau", async (req, res) => {
         `*, ChiTietDichVu, NguoiPhuTrach:User!YeuCau_NguoiPhuTrachId_fkey(id, name, username, email)`,
         { count: "exact" }
       )
-      .order("YeuCauID", { ascending: true }) 
+      .order("YeuCauID", { ascending: false }) 
       .range(from, to);
 
    
@@ -3522,7 +3522,7 @@ app.get("/api/doanhthu", async (req, res) => {
     const { data, error } = await supabase
       .from("DoanhThu")
       .select("*")
-      .order("Ngay", { ascending: true });
+      .order("Ngay", { ascending: false });
 
     if (error) throw error;
 
