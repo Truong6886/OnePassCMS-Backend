@@ -2195,7 +2195,8 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
     const { 
         LoaiDichVu, 
         DanhMuc, 
-        TenDichVu, 
+        TenDichVu,
+        DiaChiNhan,
         NgayThucHien, 
         NgayHoanThanh,
         DoanhThuTruocChietKhau, 
