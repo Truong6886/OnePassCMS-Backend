@@ -361,7 +361,16 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 const upload = multer({ 
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB limit
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    // Allow PDF and Word documents
+    const allowedMimes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    if (allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Chỉ hỗ trợ file PDF hoặc Word'), false);
+    }
   }
 });
 // Dùng bucket đã có sẵn để tránh lỗi thiếu bucket (mặc định dùng "invoice").
@@ -684,11 +693,16 @@ app.post("/api/upload-cv", upload.single("file"), async (req, res) => {
       return res.status(400).json({ success: false, message: "Vui lòng chọn file" });
     }
 
+    console.log("📁 Uploading CV:", {
+      originalName: file.originalname,
+      size: file.size,
+      mimetype: file.mimetype
+    });
 
-    const fileExt = file.originalname.split(".").pop();
+    const fileExt = file.originalname.split(".").pop().toLowerCase();
     const fileName = `cv_${Date.now()}_${Math.round(Math.random() * 1000)}.${fileExt}`;
 
-
+    // Upload to Supabase storage
     const { data, error } = await supabase.storage
       .from("cv") 
       .upload(fileName, file.buffer, {
@@ -696,9 +710,14 @@ app.post("/api/upload-cv", upload.single("file"), async (req, res) => {
         upsert: false,
       });
 
-    if (error) throw error;
+    if (error) {
+      console.error("❌ Supabase upload error:", error);
+      throw error;
+    }
 
-    // 3. Lấy Public URL để lưu vào DB
+    console.log("✅ File uploaded to Supabase:", fileName);
+
+    // Get public URL
     const { data: publicUrlData } = supabase.storage
       .from("cv")
       .getPublicUrl(fileName);
@@ -707,7 +726,9 @@ app.post("/api/upload-cv", upload.single("file"), async (req, res) => {
         throw new Error("Không lấy được đường dẫn file");
     }
 
-    // 4. Trả link về cho Frontend
+    console.log("✅ Public URL:", publicUrlData.publicUrl);
+
+    // Return success response
     res.json({ 
       success: true, 
       message: "Upload thành công", 
@@ -715,8 +736,11 @@ app.post("/api/upload-cv", upload.single("file"), async (req, res) => {
     });
 
   } catch (err) {
-    console.error("❌ Lỗi upload CV:", err);
-    res.status(500).json({ success: false, message: err.message });
+    console.error("❌ Lỗi upload CV:", err.message || err);
+    res.status(500).json({ 
+      success: false, 
+      message: err.message || "Lỗi khi upload file" 
+    });
   }
 });
 app.post("/api/upload-invoice", upload.single("file"), async (req, res) => {
@@ -1500,9 +1524,20 @@ app.post("/api/User", async (req, res) => {
       ChucDanh, PhongBan, MaVung, SoDienThoai, NgayVaoLam, LoaiHopDong, CV
     } = req.body;
     
+    console.log("📝 POST /api/User - Received body:", {
+      username: username ? "✓" : "✗",
+      password: password ? "✓" : "✗",
+      name,
+      email,
+      is_admin, is_director, is_accountant, is_staff
+    });
   
-    if (!username || !password) {
-      return res.status(400).json({ success: false, message: "Thiếu tên đăng nhập hoặc mật khẩu" });
+    if (!username || username.trim() === "") {
+      return res.status(400).json({ success: false, message: "Vui lòng nhập tên đăng nhập" });
+    }
+    
+    if (!password || password.trim() === "") {
+      return res.status(400).json({ success: false, message: "Vui lòng nhập mật khẩu" });
     }
 
     const { data: existingUsername } = await supabase
