@@ -37,7 +37,7 @@ function translateServiceName(name) {
       "비자 대행": "Thị thực",
       "법률 컨설팅": "Tư vấn pháp lý",
       "B2B 서비스": "Dịch vụ B2B",
-      "기타": "Khác",
+      "기타": "Bài viết",
     };
   return map[name?.trim()] || name?.trim() || "";
 }
@@ -3667,7 +3667,7 @@ app.get("/api/fix-mahoso", async (req, res) => {
         "비자 대행": "Thị thực",
         "법률 컨설팅": "Tư vấn pháp lý",
         "B2B 서비스": "Dịch vụ B2B",
-        "기타": "Khác",
+        "기타": "Bài viết",
       };
       return map[name?.trim()] || name?.trim() || "";
     };
