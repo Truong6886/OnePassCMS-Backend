@@ -12,7 +12,12 @@ import nodemailer from "nodemailer";
 import emailjs from '@emailjs/nodejs';
 import crypto from "crypto";
 import path from "path";
-dotenv.config();
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+dotenv.config({ path: path.join(__dirname, '.env') });
 function getInitials(str) {
   if (!str) return "";
   return str
@@ -358,23 +363,45 @@ app.use(cors({
 app.use(bodyParser.json());
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
-const upload = multer({ 
+
+// Multer instances tách biệt để tránh ảnh hưởng lẫn nhau
+// - uploadDocs: chỉ cho PDF/Word (dùng cho CV, invoice, đăng ký B2B)
+// - uploadImages: chỉ cho ảnh (dùng cho tin tức, avatar,...)
+const uploadDocs = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: 10 * 1024 * 1024, // 10MB limit
   },
   fileFilter: (req, file, cb) => {
-    // Allow PDF and Word documents
-    const allowedMimes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
-    if (allowedMimes.includes(file.mimetype)) {
+    const allowedDocs = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    ];
+
+    if (allowedDocs.includes(file.mimetype)) {
       cb(null, true);
     } else {
       cb(new Error('Chỉ hỗ trợ file PDF hoặc Word'), false);
     }
   }
 });
-// Dùng bucket đã có sẵn để tránh lỗi thiếu bucket (mặc định dùng "invoice").
-const NEWS_BUCKET = process.env.NEWS_BUCKET || "invoice";
+
+const uploadImages = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype?.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Chỉ hỗ trợ file ảnh'), false);
+    }
+  }
+});
+// Bucket riêng cho tin tức (dùng bucket 'invoice' đã tồn tại)
+const NEWS_BUCKET = "invoice";
 
 // Ensure bucket exists (idempotent)
 const ensureBucket = async (bucket) => {
@@ -686,7 +713,7 @@ app.get("/api/socket-health", (req, res) => {
 });
 
 
-app.post("/api/upload-cv", upload.single("file"), async (req, res) => {
+app.post("/api/upload-cv", uploadDocs.single("file"), async (req, res) => {
   try {
     const file = req.file;
     if (!file) {
@@ -743,7 +770,7 @@ app.post("/api/upload-cv", upload.single("file"), async (req, res) => {
     });
   }
 });
-app.post("/api/upload-invoice", upload.single("file"), async (req, res) => {
+app.post("/api/upload-invoice", uploadDocs.single("file"), async (req, res) => {
   try {
     const file = req.file;
     if (!file) {
@@ -784,16 +811,22 @@ app.post("/api/upload-invoice", upload.single("file"), async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-app.post("/api/upload-news-image", upload.single("file"), async (req, res) => {
+app.post("/api/upload-news-image", uploadImages.single("file"), async (req, res) => {
   try {
+    console.log("📸 Upload news image request received");
+    console.log("File:", req.file ? { name: req.file.originalname, size: req.file.size, mimetype: req.file.mimetype } : "NO FILE");
+    
     const file = req.file;
     if (!file) {
+      console.warn("⚠️ No file provided");
       return res.status(400).json({ success: false, message: "Vui lòng chọn file" });
     }
 
     // Ensure bucket exists (dùng bucket mặc định đã có sẵn)
     try {
+      console.log(`📦 Ensuring bucket exists: ${NEWS_BUCKET}`);
       await ensureBucket(NEWS_BUCKET);
+      console.log(`✅ Bucket ${NEWS_BUCKET} ready`);
     } catch (bucketErr) {
       console.error("❌ Không tạo/đọc được bucket:", bucketErr);
       return res.status(500).json({ success: false, message: bucketErr.message || "Bucket error" });
@@ -806,6 +839,8 @@ app.post("/api/upload-news-image", upload.single("file"), async (req, res) => {
     const baseName = sanitizedName.replace(fileExt, "") || "news-image";
     const uniqueName = `${baseName}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const filePath = `${uniqueName}${fileExt}`;
+    
+    console.log(`📝 File path: ${filePath}`);
 
     const { error } = await supabase.storage
       .from(NEWS_BUCKET)
@@ -814,15 +849,23 @@ app.post("/api/upload-news-image", upload.single("file"), async (req, res) => {
         upsert: false,
       });
 
-    if (error) throw error;
+    if (error) {
+      console.error("❌ Supabase upload error:", error);
+      throw error;
+    }
+    
+    console.log("✅ File uploaded to Supabase");
 
     const { data: publicUrlData } = supabase.storage
       .from(NEWS_BUCKET)
       .getPublicUrl(filePath);
 
     if (!publicUrlData || !publicUrlData.publicUrl) {
+      console.error("❌ No public URL returned");
       throw new Error("Không lấy được đường dẫn file");
     }
+    
+    console.log("✅ Public URL obtained:", publicUrlData.publicUrl);
 
     res.json({
       success: true,
@@ -832,8 +875,8 @@ app.post("/api/upload-news-image", upload.single("file"), async (req, res) => {
     });
 
   } catch (err) {
-    console.error("❌ Lỗi upload ảnh tin tức:", err);
-    res.status(500).json({ success: false, message: err.message });
+    console.error("❌ Lỗi upload ảnh tin tức:", err.message || err);
+    res.status(500).json({ success: false, message: err.message || "Upload failed" });
   }
 });
 // ================= EMAIL LIST =================
@@ -1160,7 +1203,7 @@ app.post("/api/b2b/forgot-password", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-app.post("/api/b2b/register", upload.single("pdf"), async (req, res) => {
+app.post("/api/b2b/register", uploadDocs.single("pdf"), async (req, res) => {
   try {
     const {
       TenDoanhNghiep,
@@ -1621,7 +1664,7 @@ app.delete("/api/User/:id", async (req, res) => {
 });
 
 // [CẬP NHẬT SỬA LỖI 500] PUT Update User
-app.put("/api/User/:id", upload.single("avatar"), async (req, res) => {
+app.put("/api/User/:id", uploadImages.single("avatar"), async (req, res) => {
   try {
     const { id } = req.params;
     let { 
@@ -3182,7 +3225,7 @@ app.get("/api/yeucau", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-app.post("/api/upload-b2b-doc", upload.array("files", 10), async (req, res) => {
+app.post("/api/upload-b2b-doc", uploadDocs.array("files", 10), async (req, res) => {
   try {
     const files = req.files;
     if (!files || files.length === 0) {
