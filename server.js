@@ -365,7 +365,7 @@ app.use(bodyParser.json());
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
 // Multer instances tách biệt để tránh ảnh hưởng lẫn nhau
-// - uploadDocs: chỉ cho PDF/Word (dùng cho CV, invoice, đăng ký B2B)
+// - uploadDocs: cho PDF/Word và ảnh (dùng cho CV, invoice, đăng ký B2B)
 // - uploadImages: chỉ cho ảnh (dùng cho tin tức, avatar,...)
 const uploadDocs = multer({
   storage: multer.memoryStorage(),
@@ -379,10 +379,13 @@ const uploadDocs = multer({
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     ];
 
-    if (allowedDocs.includes(file.mimetype)) {
+    const isAllowedImage = file.mimetype?.startsWith('image/');
+    const isAllowedDoc = allowedDocs.includes(file.mimetype);
+
+    if (isAllowedDoc || isAllowedImage) {
       cb(null, true);
     } else {
-      cb(new Error('Chỉ hỗ trợ file PDF hoặc Word'), false);
+      cb(new Error('Chỉ hỗ trợ file PDF, Word hoặc ảnh (jpg, png)'), false);
     }
   }
 });
@@ -1203,26 +1206,78 @@ app.post("/api/b2b/forgot-password", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-app.post("/api/b2b/register", uploadDocs.single("pdf"), async (req, res) => {
-  try {
-    const {
-      TenDoanhNghiep,
-      SoDKKD,
-      Email,
-      MatKhau,
-      MaVung,
-      LoaiWebsite,
-      Website,
-      SoDienThoai,
-      NguoiDaiDien,
-      DichVu,
-      DichVuKhac,
-      NganhNgheChinh 
-    } = req.body;
+app.post("/api/b2b/register", (req, res) => {
+  uploadDocs.single("pdf")(req, res, async (multerErr) => {
+    if (multerErr) {
+      return res.status(400).json({ success: false, message: multerErr.message });
+    }
+
+    try {
+      const {
+        TenDoanhNghiep,
+        SoDKKD,
+        Email,
+        MatKhau,
+        MaVung,
+        LoaiWebsite,
+        Website,
+        SoDienThoai,
+        NguoiDaiDien,
+        DichVu,
+        DichVuKhac,
+        NganhNgheChinh 
+      } = req.body;
+
+    // Giới hạn độ dài để tránh lỗi Supabase (tương tự logic reject)
+    const truncate = (val, limit = 100) => {
+      if (val === undefined || val === null) return "";
+      const str = String(val).trim();
+      return str.length > limit ? str.slice(0, limit) : str;
+    };
+
+    const limits = {
+      TenDoanhNghiep: 100,
+      SoDKKD: 50,
+      Email: 100,
+      MaVung: 20,
+      Website: 255,
+      LoaiWebsite: 50,
+      SoDienThoai: 30,
+      NguoiDaiDien: 100,
+      DichVu: 255,
+      DichVuKhac: 255,
+      NganhNgheChinh: 255,
+      PdfPath: 255,
+      MatKhau: 255,
+    };
 
     // 1. Chuẩn hóa dữ liệu đầu vào (Xóa khoảng trắng thừa)
-    const cleanSoDKKD = SoDKKD ? SoDKKD.toString().trim() : "";
-    const cleanEmail = Email ? Email.toString().trim() : "";
+    const cleanSoDKKD = truncate(SoDKKD, limits.SoDKKD);
+    const cleanEmail = truncate(Email, limits.Email);
+
+    // Bắt buộc các trường tối thiểu để tránh supabase trả lỗi mơ hồ
+    const requiredFields = [
+      ["TenDoanhNghiep", TenDoanhNghiep],
+      ["SoDKKD", cleanSoDKKD],
+      ["Email", cleanEmail],
+      ["MatKhau", MatKhau],
+      ["MaVung", MaVung],
+      ["SoDienThoai", SoDienThoai],
+      ["NguoiDaiDien", NguoiDaiDien],
+      ["NganhNgheChinh", NganhNgheChinh],
+      ["DichVu", DichVu]
+    ];
+
+    const missing = requiredFields
+      .filter(([_, v]) => v === undefined || v === null || String(v).trim() === "")
+      .map(([k]) => k);
+
+    if (missing.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Thiếu dữ liệu: ${missing.join(", ")}`
+      });
+    }
 
     if (!cleanSoDKKD) {
       return res.status(400).json({ success: false, message: "Số ĐKKD không được để trống" });
@@ -1263,49 +1318,52 @@ app.post("/api/b2b/register", uploadDocs.single("pdf"), async (req, res) => {
 
 
 
-    let PdfPath = null;
-    if (req.file) {
-      const fileExt = req.file.originalname.split(".").pop();
-      const fileName = `b2b_${cleanSoDKKD}_${Date.now()}.${fileExt}`;
-      
-      const { error: uploadError } = await supabase.storage
-        .from("b2b_pdf") 
-        .upload(fileName, req.file.buffer, {
-          contentType: req.file.mimetype,
-          upsert: true,
-        });
+      let PdfPath = null;
+      if (req.file) {
+        const fileExt = req.file.originalname.split(".").pop();
+        const fileName = `b2b_${cleanSoDKKD}_${Date.now()}.${fileExt}`;
         
-      if (!uploadError) {
-        const { data: publicUrlData } = supabase.storage
-          .from("b2b_pdf")
-          .getPublicUrl(fileName);
-        PdfPath = publicUrlData.publicUrl;
+        const { error: uploadError } = await supabase.storage
+          .from("b2b_pdf") 
+          .upload(fileName, req.file.buffer, {
+            contentType: req.file.mimetype,
+            upsert: true,
+          });
+          
+        if (!uploadError) {
+          const { data: publicUrlData } = supabase.storage
+            .from("b2b_pdf")
+            .getPublicUrl(fileName);
+          PdfPath = publicUrlData.publicUrl;
+        }
       }
-    }
 
    
     const { data, error } = await supabase
       .from("B2B_PENDING")
       .insert([
         {
-          TenDoanhNghiep,
+          TenDoanhNghiep: truncate(TenDoanhNghiep, limits.TenDoanhNghiep),
           SoDKKD: cleanSoDKKD,
           Email: cleanEmail,
-          MatKhau: MatKhau,
-          MaVung: MaVung,
-          SoDienThoai,
-          LoaiWebsite: LoaiWebsite || "",
-          Website: Website || null,
-          NguoiDaiDien,
-          DichVu,
-          DichVuKhac,
-          NganhNgheChinh,
-          PdfPath
+          MatKhau: truncate(MatKhau, limits.MatKhau),
+          MaVung: truncate(MaVung, limits.MaVung),
+          SoDienThoai: truncate(SoDienThoai, limits.SoDienThoai),
+          LoaiWebsite: truncate(LoaiWebsite || "", limits.LoaiWebsite),
+          Website: truncate(Website || null, limits.Website),
+          NguoiDaiDien: truncate(NguoiDaiDien, limits.NguoiDaiDien),
+          DichVu: truncate(DichVu, limits.DichVu),
+          DichVuKhac: truncate(DichVuKhac, limits.DichVuKhac),
+          NganhNgheChinh: truncate(NganhNgheChinh, limits.NganhNgheChinh),
+          PdfPath: truncate(PdfPath, limits.PdfPath)
         }
       ])
       .select();
 
-    if (error) throw error;
+    if (error) {
+      console.error("Supabase insert B2B_PENDING error:", error);
+      throw error;
+    }
     const newB2B = data[0]; 
 
     if (global.io) {
@@ -1479,12 +1537,15 @@ app.post("/api/b2b/register", uploadDocs.single("pdf"), async (req, res) => {
       console.error("⚠️ Lỗi gửi mail admin:", adminMailErr);
     }
 
-    res.json({ success: true, message: "Đăng ký thành công", data: newB2B });
+      res.json({ success: true, message: "Đăng ký thành công", data: newB2B });
 
-  } catch (err) {
-    console.error("❌ Lỗi API đăng ký B2B:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
+    } catch (err) {
+      console.error("❌ Lỗi API đăng ký B2B:", err);
+      const detail = err?.message || err?.toString?.() || "Internal Error";
+      const supaDetails = err?.details || err?.hint || err?.code || "";
+      res.status(500).json({ success: false, message: detail, details: supaDetails });
+    }
+  });
 });
 
 app.put("/api/b2b/pending/:id", async (req, res) => {
@@ -1727,6 +1788,30 @@ app.post("/api/b2b/pending/:id/reject", async (req, res) => {
     const { id } = req.params;
     const { reason } = req.body;
 
+    const truncate = (val, limit = 20) => {
+      if (typeof val !== "string") return val;
+      return val.slice(0, limit);
+    };
+
+    const limits = {
+      TenDoanhNghiep: 20,
+      SoDKKD: 20,
+      Email: 20,
+      MaVung: 20,
+      Website: 20,
+      LoaiWebsite: 20,
+      SoDienThoai: 20,
+      NguoiDaiDien: 20,
+      DichVu: 20,
+      DichVuKhac: 20,
+      NganhNgheChinh: 20,
+      PdfPath: 255,
+      Status: 20,
+      LyDoTuChoi: 20
+    };
+
+    const clamp = (key, val) => truncate(val || "", limits[key] ?? 20);
+
     if (!reason || reason.trim() === "") {
       return res.status(400).json({
         success: false,
@@ -1752,26 +1837,29 @@ app.post("/api/b2b/pending/:id/reject", async (req, res) => {
     const { data: rejectedData, error: insertError } = await supabase
       .from("B2B_REJECTED")
       .insert([{
-        TenDoanhNghiep: pendingData.TenDoanhNghiep,
-        SoDKKD: pendingData.SoDKKD,
-        Email: pendingData.Email,
-        MaVung: pendingData.MaVung,
-        Website: pendingData.Website,
-        LoaiWebsite: pendingData.LoaiWebsite,
-        SoDienThoai: pendingData.SoDienThoai,
-        NguoiDaiDien: pendingData.NguoiDaiDien,
-        DichVu: pendingData.DichVu || "",
-        DichVuKhac: pendingData.DichVuKhac || "",
-        NganhNgheChinh: pendingData.NganhNgheChinh || "",
-        PdfPath: pendingData.PdfPath,
-        LyDoTuChoi: reason.trim(),
+        TenDoanhNghiep: clamp("TenDoanhNghiep", pendingData.TenDoanhNghiep),
+        SoDKKD: clamp("SoDKKD", pendingData.SoDKKD),
+        Email: clamp("Email", pendingData.Email),
+        MaVung: clamp("MaVung", pendingData.MaVung),
+        Website: clamp("Website", pendingData.Website),
+        LoaiWebsite: clamp("LoaiWebsite", pendingData.LoaiWebsite),
+        SoDienThoai: clamp("SoDienThoai", pendingData.SoDienThoai),
+        NguoiDaiDien: clamp("NguoiDaiDien", pendingData.NguoiDaiDien),
+        DichVu: clamp("DichVu", pendingData.DichVu),
+        DichVuKhac: clamp("DichVuKhac", pendingData.DichVuKhac),
+        NganhNgheChinh: clamp("NganhNgheChinh", pendingData.NganhNgheChinh),
+        PdfPath: clamp("PdfPath", pendingData.PdfPath),
+        LyDoTuChoi: clamp("LyDoTuChoi", reason.trim()),
         NgayTao: new Date().toISOString(),
-        Status: "Đã từ chối"
+        Status: clamp("Status", "Đã từ chối")
       }])
       .select()
       .single();
 
-    if (insertError) throw insertError;
+    if (insertError) {
+      console.error("Insert rejected failed", insertError);
+      return res.status(400).json({ success: false, message: insertError.message });
+    }
 
     // 3. Xóa khỏi B2B_PENDING
     const { error: deleteError } = await supabase
