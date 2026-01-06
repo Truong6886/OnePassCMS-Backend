@@ -359,8 +359,9 @@ app.use(cors({
   credentials: true
 }));
 
-
-app.use(bodyParser.json());
+// Increase body size limits for FormData with file upload
+app.use(bodyParser.json({ limit: '50mb' }));
+app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
@@ -1207,28 +1208,25 @@ app.post("/api/b2b/forgot-password", async (req, res) => {
   }
 });
 app.post("/api/b2b/register", (req, res) => {
-  uploadDocs.single("pdf")(req, res, async (multerErr) => {
+  uploadDocs.single("giayDangKyKinhDoanh")(req, res, async (multerErr) => {
     if (multerErr) {
       return res.status(400).json({ success: false, message: multerErr.message });
     }
 
     try {
       const {
-        TenDoanhNghiep,
-        SoDKKD,
-        Email,
-        MatKhau,
-        MaVung,
-        LoaiWebsite,
-        Website,
-        SoDienThoai,
-        NguoiDaiDien,
-        DichVu,
-        DichVuKhac,
-        NganhNgheChinh 
+        tenDoanhNghiep,
+        soDKKD,
+        nguoiDaiDienPhapLuat,
+        nganhNgheChinh,
+        soDienThoaiLienHe,
+        email,
+        matKhau,
+        dichVuChinh,
+        website
       } = req.body;
 
-    // Giới hạn độ dài để tránh lỗi Supabase (tương tự logic reject)
+    // Giới hạn độ dài để tránh lỗi Supabase
     const truncate = (val, limit = 100) => {
       if (val === undefined || val === null) return "";
       const str = String(val).trim();
@@ -1239,33 +1237,29 @@ app.post("/api/b2b/register", (req, res) => {
       TenDoanhNghiep: 100,
       SoDKKD: 50,
       Email: 100,
-      MaVung: 20,
       Website: 255,
-      LoaiWebsite: 50,
       SoDienThoai: 30,
       NguoiDaiDien: 100,
       DichVu: 255,
-      DichVuKhac: 255,
       NganhNgheChinh: 255,
       PdfPath: 255,
       MatKhau: 255,
     };
 
-    // 1. Chuẩn hóa dữ liệu đầu vào (Xóa khoảng trắng thừa)
-    const cleanSoDKKD = truncate(SoDKKD, limits.SoDKKD);
-    const cleanEmail = truncate(Email, limits.Email);
+    // Chuẩn hóa dữ liệu đầu vào
+    const cleanSoDKKD = truncate(soDKKD, limits.SoDKKD);
+    const cleanEmail = truncate(email, limits.Email);
 
-    // Bắt buộc các trường tối thiểu để tránh supabase trả lỗi mơ hồ
+    // Bắt buộc các trường tối thiểu
     const requiredFields = [
-      ["TenDoanhNghiep", TenDoanhNghiep],
-      ["SoDKKD", cleanSoDKKD],
-      ["Email", cleanEmail],
-      ["MatKhau", MatKhau],
-      ["MaVung", MaVung],
-      ["SoDienThoai", SoDienThoai],
-      ["NguoiDaiDien", NguoiDaiDien],
-      ["NganhNgheChinh", NganhNgheChinh],
-      ["DichVu", DichVu]
+      ["tenDoanhNghiep", tenDoanhNghiep],
+      ["soDKKD", cleanSoDKKD],
+      ["email", cleanEmail],
+      ["matKhau", matKhau],
+      ["nguoiDaiDienPhapLuat", nguoiDaiDienPhapLuat],
+      ["nganhNgheChinh", nganhNgheChinh],
+      ["soDienThoaiLienHe", soDienThoaiLienHe],
+      ["dichVuChinh", dichVuChinh]
     ];
 
     const missing = requiredFields
@@ -1283,7 +1277,7 @@ app.post("/api/b2b/register", (req, res) => {
       return res.status(400).json({ success: false, message: "Số ĐKKD không được để trống" });
     }
 
-
+    // Kiểm tra trong bảng ĐÃ DUYỆT (B2B_APPROVED)
     const { data: existingApproved, error: errApproved } = await supabase
       .from("B2B_APPROVED")
       .select("ID, TenDoanhNghiep")
@@ -1295,249 +1289,162 @@ app.post("/api/b2b/register", (req, res) => {
     if (existingApproved) {
       return res.status(400).json({
         success: false,
-        message: `Số ĐKKD ${cleanSoDKKD} đã tồn tại trong hệ thống (Doanh nghiệp: ${existingApproved.TenDoanhNghiep}).  vui lòng trở về trang đăng nhập.`
+        message: `Số ĐKKD ${cleanSoDKKD} đã tồn tại trong hệ thống (Doanh nghiệp: ${existingApproved.TenDoanhNghiep}). Vui lòng trở về trang đăng nhập.`
       });
     }
 
-    // 2.2 Kiểm tra trong bảng CHỜ DUYỆT (B2B_PENDING)
-    // Nếu tìm thấy => Đang chờ admin duyệt => Chặn đăng ký để tránh spam
-    const { data: existingPending, error: errPending } = await supabase
-      .from("B2B_PENDING")
-      .select("ID")
-      .eq("SoDKKD", cleanSoDKKD)
-      .maybeSingle();
-
-    if (errPending) throw errPending;
-
-    if (existingPending) {
-      return res.status(400).json({
-        success: false,
-        message: `Số ĐKKD ${cleanSoDKKD} đang chờ phê duyệt. Vui lòng chờ admin phản hồi.`
-      });
-    }
-
-
-
-      let PdfPath = null;
-      if (req.file) {
-        const fileExt = req.file.originalname.split(".").pop();
-        const fileName = `b2b_${cleanSoDKKD}_${Date.now()}.${fileExt}`;
+    // Upload file nếu có
+    let PdfPath = null;
+    if (req.file) {
+      const fileExt = req.file.originalname.split(".").pop();
+      const fileName = `b2b_${cleanSoDKKD}_${Date.now()}.${fileExt}`;
+      
+      const { error: uploadError } = await supabase.storage
+        .from("b2b_pdf") 
+        .upload(fileName, req.file.buffer, {
+          contentType: req.file.mimetype,
+          upsert: true,
+        });
         
-        const { error: uploadError } = await supabase.storage
-          .from("b2b_pdf") 
-          .upload(fileName, req.file.buffer, {
-            contentType: req.file.mimetype,
-            upsert: true,
-          });
-          
-        if (!uploadError) {
-          const { data: publicUrlData } = supabase.storage
-            .from("b2b_pdf")
-            .getPublicUrl(fileName);
-          PdfPath = publicUrlData.publicUrl;
-        }
+      if (!uploadError) {
+        const { data: publicUrlData } = supabase.storage
+          .from("b2b_pdf")
+          .getPublicUrl(fileName);
+        PdfPath = publicUrlData.publicUrl;
       }
+    }
 
-   
+    // Hash mật khẩu
+    const hashedPassword = await bcrypt.hash(matKhau, 10);
+
+    // Lưu trực tiếp vào B2B_APPROVED
     const { data, error } = await supabase
-      .from("B2B_PENDING")
+      .from("B2B_APPROVED")
       .insert([
         {
-          TenDoanhNghiep: truncate(TenDoanhNghiep, limits.TenDoanhNghiep),
+          TenDoanhNghiep: truncate(tenDoanhNghiep, limits.TenDoanhNghiep),
           SoDKKD: cleanSoDKKD,
           Email: cleanEmail,
-          MatKhau: truncate(MatKhau, limits.MatKhau),
-          MaVung: truncate(MaVung, limits.MaVung),
-          SoDienThoai: truncate(SoDienThoai, limits.SoDienThoai),
-          LoaiWebsite: truncate(LoaiWebsite || "", limits.LoaiWebsite),
-          Website: truncate(Website || null, limits.Website),
-          NguoiDaiDien: truncate(NguoiDaiDien, limits.NguoiDaiDien),
-          DichVu: truncate(DichVu, limits.DichVu),
-          DichVuKhac: truncate(DichVuKhac, limits.DichVuKhac),
-          NganhNgheChinh: truncate(NganhNgheChinh, limits.NganhNgheChinh),
-          PdfPath: truncate(PdfPath, limits.PdfPath)
+          MatKhau: hashedPassword,
+          SoDienThoai: truncate(soDienThoaiLienHe, limits.SoDienThoai),
+          Website: truncate(website || "", limits.Website),
+          NguoiDaiDien: truncate(nguoiDaiDienPhapLuat, limits.NguoiDaiDien),
+          DichVu: truncate(dichVuChinh, limits.DichVu),
+          NganhNgheChinh: truncate(nganhNgheChinh, limits.NganhNgheChinh),
+          PdfPath: truncate(PdfPath, limits.PdfPath),
+          DoanhThu: 0
         }
       ])
       .select();
 
     if (error) {
-      console.error("Supabase insert B2B_PENDING error:", error);
+      console.error("Supabase insert B2B_APPROVED error:", error);
       throw error;
     }
-    const newB2B = data[0]; 
+    
+    const newB2B = data[0];
 
+    // Gửi notification qua socket
     if (global.io) {
       const notificationPayload = {
         YeuCauID: newB2B.ID,               
-        HoTen: `${TenDoanhNghiep}`,  
-        TenDichVu: "Đăng ký Đối tác B2B",
-        TenHinhThuc: "Form đăng ký",
-        SoDienThoai: SoDienThoai,
+        HoTen: tenDoanhNghiep,  
+        TenDichVu: "Đăng ký Doanh nghiệp B2B",
+        TenHinhThuc: "Đăng ký trực tiếp",
+        SoDienThoai: soDienThoaiLienHe,
         Email: cleanEmail,
         NgayTao: new Date().toISOString(),
-        LoaiThongBao: "B2B_REGISTER"       
+        LoaiThongBao: "B2B_APPROVED"       
       };
       global.io.emit("new_request", notificationPayload);
     }
+
+    // Gửi email xác nhận
     try {
-    const emailContent = `
-        <div style="
-          max-width: 600px;
-          margin: auto;
-          padding: 20px;
-          font-family: 'Segoe UI', Arial, sans-serif;
-          border: 1px solid #e5e7eb;
-          border-radius: 10px;
-          background: #ffffff;
-        ">
+      const emailContent = `
+        <div style="max-width: 600px; margin: auto; padding: 20px; font-family: 'Segoe UI', Arial, sans-serif; border: 1px solid #e5e7eb; border-radius: 10px; background: #ffffff;">
           <div style="text-align: center; border-bottom: 2px solid #2C4D9E; padding-bottom: 15px; margin-bottom: 20px;">
-            <h2 style="color: #2C4D9E; margin: 0; font-size: 22px;">
-              Đăng ký tài khoản B2B thành công
-            </h2>
-            <h3 style="color: #666; margin: 5px 0 0 0; font-size: 16px; font-weight: normal; font-style: italic;">
-              Successful B2B Account Registration
-            </h3>
+            <h2 style="color: #2C4D9E; margin: 0; font-size: 22px;">Đăng ký tài khoản B2B thành công</h2>
+            <h3 style="color: #666; margin: 5px 0 0 0; font-size: 16px; font-weight: normal; font-style: italic;">Successful B2B Account Registration</h3>
           </div>
-
-          <p style="font-size: 16px; color: #333; margin-bottom: 20px;">
-            Xin chào <strong>${TenDoanhNghiep}</strong>,<br>
-            <span style="font-size: 14px; color: #666; font-style: italic;">Hello <strong>${TenDoanhNghiep}</strong>,</span>
-          </p>
-          
-          <p style="font-size: 15px; color: #333; margin-bottom: 2px;">
-            Cảm ơn Quý doanh nghiệp đã đăng ký trở thành đối tác B2B của OnePass. Hồ sơ của Quý khách hiện đang ở trạng thái <strong>Chờ phê duyệt</strong>.
-          </p>
-          <p style="font-size: 14px; color: #666; font-style: italic; margin-top: 0; margin-bottom: 20px;">
-            Thank you for registering to become a OnePass B2B partner. Your profile is currently <strong>Pending Approval</strong>.
-          </p>
-
-          <div style="
-            background: #f8f9fa;
-            padding: 15px;
-            border-radius: 8px;
-            border-left: 4px solid #2C4D9E;
-            margin-top: 15px;
-            font-size: 15px;
-            color: #333;
-          ">
-            <div style="margin-bottom: 10px;">
-              <b>Số ĐKKD:</b> ${SoDKKD}<br>
-              <span style="font-size: 13px; color: #666; font-style: italic;">Business Reg. No: ${SoDKKD}</span>
-            </div>
-            
-            <div style="margin-bottom: 10px;">
-              <b>Người đại diện:</b> ${NguoiDaiDien}<br>
-              <span style="font-size: 13px; color: #666; font-style: italic;">Representative: ${NguoiDaiDien}</span>
-            </div>
-
-            <div style="margin-bottom: 10px;">
-              <b>Email đăng ký:</b> ${Email}<br>
-              <span style="font-size: 13px; color: #666; font-style: italic;">Registered Email: ${Email}</span>
-            </div>
-
-            <div>
-              <b>SĐT:</b> ${SoDienThoai || "N/A"}<br>
-              <span style="font-size: 13px; color: #666; font-style: italic;">Phone: ${SoDienThoai || "N/A"}</span>
-            </div>
-          </div>
-
-          <div style="margin-top: 25px;">
-            <p style="font-size: 15px; color: #333; margin-bottom: 2px;">
-              Bộ phận quản lý sẽ kiểm tra và kích hoạt tài khoản trong thời gian sớm nhất. Quý khách sẽ nhận được email thông báo khi tài khoản được kích hoạt.
+          <div style="padding: 0 10px;">
+            <p style="color: #333; font-size: 15px; line-height: 1.6;">
+              Xin chào <strong>${tenDoanhNghiep}</strong>,
             </p>
-            <p style="font-size: 14px; color: #666; font-style: italic; margin-top: 0;">
-              The management team will review and activate your account as soon as possible. You will receive a notification email once the account is activated.
+            <p style="color: #333; font-size: 15px; line-height: 1.6;">
+              Cảm ơn bạn đã đăng ký tài khoản B2B với <strong>OnePass</strong>. Tài khoản của bạn đã được tạo thành công!
             </p>
+            <div style="background: #f9fafb; padding: 15px; border-radius: 8px; margin: 20px 0;">
+              <p style="margin: 5px 0; color: #555;"><strong>Tên doanh nghiệp:</strong> ${tenDoanhNghiep}</p>
+              <p style="margin: 5px 0; color: #555;"><strong>Số ĐKKD:</strong> ${cleanSoDKKD}</p>
+              <p style="margin: 5px 0; color: #555;"><strong>Email:</strong> ${cleanEmail}</p>
+              <p style="margin: 5px 0; color: #555;"><strong>Dịch vụ:</strong> ${dichVuChinh}</p>
+            </div>
+            <p style="color: #333; font-size: 15px; line-height: 1.6;">
+              Bạn có thể đăng nhập vào hệ thống để sử dụng các dịch vụ B2B của chúng tôi.
+            </p>
+            <div style="text-align: center; margin: 25px 0;">
+              <a href="https://onepass-cms.vercel.app/b2b" style="display: inline-block; background: #2C4D9E; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; font-weight: 600;">Đăng nhập ngay</a>
+            </div>
           </div>
-
-          <p style="margin-top: 30px; font-size: 14px; color: #333; text-align: center;">
-            Trân trọng,<br>
-            <span style="font-size: 13px; color: #666; font-style: italic;">Best regards,</span><br><br>
-            <strong>Đội ngũ OnePass</strong><br>
-            <span style="font-size: 13px; color: #666; font-style: italic;">OnePass Team</span>
-          </p>
+          <div style="border-top: 1px solid #e5e7eb; padding-top: 15px; margin-top: 20px; text-align: center; color: #666; font-size: 12px;">
+            <p>Nếu bạn có bất kỳ câu hỏi nào, vui lòng liên hệ với chúng tôi.</p>
+            <p style="margin: 5px 0;"><strong>OnePass Support Team</strong></p>
+            <p style="margin: 5px 0;">Email: support@onepass.com | Phone: +84 123 456 789</p>
+          </div>
         </div>
       `;
-      await sendEmailToCustomer(Email, "OnePass - Xác nhận đăng ký B2B | B2B Registration Confirmation", emailContent);
+
+      await sendEmailToCustomer(cleanEmail, "OnePass - Xác nhận đăng ký B2B | B2B Registration Confirmation", emailContent);
     } catch (mailError) {
       console.error("⚠️ Lỗi gửi mail khách:", mailError);
     }
 
-    
-   try {
+    // Gửi email cho admin
+    try {
       const adminEmails = await getAdminEmails();
-      await sendEmailToAdmin(
-        "OnePass - Có doanh nghiệp B2B mới đăng ký",
-        `
-        <div style="
-          max-width: 600px;
-          margin: auto;
-          padding: 20px;
-          font-family: 'Segoe UI', Arial, sans-serif;
-          border: 1px solid #e5e7eb;
-          border-radius: 10px;
-          background: #ffffff;
-        ">
-          
-          <h2 style="
-            color: #2C4D9E;
-            text-align: center;
-            margin-bottom: 20px;
-            border-bottom: 2px solid #2C4D9E;
-            padding-bottom: 10px;
-          ">
-            Doanh nghiệp mới đăng ký đối tác
+      const adminEmailContent = `
+        <div style="max-width: 600px; margin: auto; padding: 20px; font-family: 'Segoe UI', Arial, sans-serif; border: 1px solid #e5e7eb; border-radius: 10px; background: #ffffff;">
+          <h2 style="color: #2C4D9E; text-align: center; margin-bottom: 20px; border-bottom: 2px solid #2C4D9E; padding-bottom: 10px;">
+            Doanh nghiệp mới đăng ký B2B
           </h2>
-
           <p style="font-size: 16px; color: #333;">
-            Một doanh nghiệp vừa gửi hồ sơ đăng ký đối tác. Vui lòng xem chi tiết bên dưới:
+            Một doanh nghiệp vừa đăng ký tài khoản B2B. Thông tin chi tiết:
           </p>
-
-          <div style="
-            background: #f8f9fa;
-            padding: 15px;
-            border-radius: 8px;
-            border-left: 4px solid #2C4D9E;
-            margin-top: 10px;
-            font-size: 15px;
-            color: #333;
-          ">
-            <p><b>Tên doanh nghiệp:</b> ${TenDoanhNghiep}</p>
-            <p><b>Số ĐKKD:</b> ${SoDKKD}</p>
-            <p><b>Người đại diện:</b> ${NguoiDaiDien}</p>
-            <p><b>Email:</b> ${Email}</p>
-            <p><b>Số điện thoại:</b> ${SoDienThoai || ""}</p>
-            <p><b>Ngành nghề:</b> ${NganhNgheChinh || ""}</p>
+          <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 4px solid #2C4D9E; margin-top: 10px; font-size: 15px; color: #333;">
+            <p><b>Tên doanh nghiệp:</b> ${tenDoanhNghiep}</p>
+            <p><b>Số ĐKKD:</b> ${cleanSoDKKD}</p>
+            <p><b>Người đại diện:</b> ${nguoiDaiDienPhapLuat}</p>
+            <p><b>Email:</b> ${cleanEmail}</p>
+            <p><b>Số điện thoại:</b> ${soDienThoaiLienHe}</p>
+            <p><b>Ngành nghề:</b> ${nganhNgheChinh}</p>
+            <p><b>Dịch vụ:</b> ${dichVuChinh}</p>
           </div>
-
           <div style="margin-top: 25px; text-align: center;">
-            <a href="https://onepasscms.vercel.app/B2B"
-              style="
-                background: #2C4D9E;
-                color: white;
-                padding: 12px 24px;
-                border-radius: 6px;
-                text-decoration: none;
-                font-size: 16px;
-                font-weight: bold;
-                display: inline-block;
-              ">
-              Mở CMS để duyệt
+            <a href="https://onepasscms.vercel.app/B2B" style="background: #2C4D9E; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-size: 16px; font-weight: bold; display: inline-block;">
+              Xem trong CMS
             </a>
           </div>
-
           <p style="margin-top: 20px; font-size: 13px; color: #6c757d; text-align: center;">
             Email được gửi tự động từ hệ thống OnePass CMS.
           </p>
         </div>
-        `,
+      `;
+      
+      await sendEmailToAdmin(
+        "OnePass - Doanh nghiệp B2B mới đăng ký",
+        adminEmailContent,
         adminEmails
       );
     } catch (adminMailErr) {
       console.error("⚠️ Lỗi gửi mail admin:", adminMailErr);
     }
 
-      res.json({ success: true, message: "Đăng ký thành công", data: newB2B });
+    res.json({ 
+      success: true, 
+      message: "Đăng ký doanh nghiệp B2B thành công!", 
+      data: newB2B 
+    });
 
     } catch (err) {
       console.error("❌ Lỗi API đăng ký B2B:", err);
