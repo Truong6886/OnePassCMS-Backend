@@ -1210,10 +1210,13 @@ app.post("/api/b2b/forgot-password", async (req, res) => {
 app.post("/api/b2b/register", (req, res) => {
   uploadDocs.single("giayDangKyKinhDoanh")(req, res, async (multerErr) => {
     if (multerErr) {
-      return res.status(400).json({ success: false, message: multerErr.message });
+      console.error("❌ Multer Error:", multerErr);
+      return res.status(400).json({ success: false, message: "File upload error: " + multerErr.message });
     }
 
     try {
+      console.log("📝 B2B Register Request Body:", req.body);
+      console.log("📁 File uploaded:", req.file ? req.file.originalname : "No file");
       const {
         tenDoanhNghiep,
         soDKKD,
