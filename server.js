@@ -1334,8 +1334,7 @@ app.post("/api/b2b/register", (req, res) => {
           NguoiDaiDien: truncate(nguoiDaiDienPhapLuat, limits.NguoiDaiDien),
           DichVu: truncate(dichVuChinh, limits.DichVu),
           NganhNgheChinh: truncate(nganhNgheChinh, limits.NganhNgheChinh),
-          PdfPath: truncate(PdfPath, limits.PdfPath),
-          DoanhThu: 0
+          PdfPath: truncate(PdfPath, limits.PdfPath)
         }
       ])
       .select();
