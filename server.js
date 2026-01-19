@@ -33,7 +33,7 @@ function getInitials(str) {
 }
 function translateServiceName(name) {
     const map = {
-      "인증 센터": "Chứng thực",
+      "인증 센터": "Hợp pháp hóa, công chứng",
       "결혼 이민": "Kết hôn",
       "출생신고 대행": "Khai sinh, khai tử",
       "국적 대행": "Quốc tịch",
@@ -92,7 +92,7 @@ const SERVICE_MAPPING = {
     "Giấy xác nhận tình trạng hôn nhân": "TTHN",
     "Giấy chứng nhận đủ điều kiện kết hôn Việt - Hàn": "KHV-H"
   },
-  "Chứng thực": {
+  "Hợp pháp hóa, công chứng": {
     "Hợp pháp hoá lãnh sự/Chứng nhận lãnh sự": "HPH",
     "Công chứng, chứng thực hợp đồng giao dịch": "CCHD",
     "Hợp đồng ủy quyền": "HDUQ",
@@ -106,6 +106,10 @@ const SERVICE_MAPPING = {
     "Dịch Việt - Hàn": "DTVH",
     "Dịch Hàn - Việt": "DTHV",
     "Dịch BLX": "DTBLX"
+  },
+  "Dịch thuật": {
+    "Công chứng bản dịch": "CNBD",
+    "Xin cấp hộ hồ sơ": "XCHS"
   }
 };
 
