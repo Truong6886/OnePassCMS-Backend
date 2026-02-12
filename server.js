@@ -2170,7 +2170,7 @@ app.post("/api/b2b/services", async (req, res) => {
       GhiChu, NguoiPhuTrachId, GoiDichVu,
       DoanhThuTruocChietKhau, Vi, MucChietKhau,
       approveAction, userId, ChiTietDichVu, 
-      TrangThai 
+      TrangThai, DiaChiNhan 
     } = req.body;
 
     if (!DoanhNghiepID || !LoaiDichVu) {
