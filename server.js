@@ -105,13 +105,86 @@ const SERVICE_MAPPING = {
     "Xác minh": "XM",
     "Dịch Việt - Hàn": "DTVH",
     "Dịch Hàn - Việt": "DTHV",
-    "Dịch BLX": "DTBLX"
+    "Dịch BLX": "DTBLX",
+    "Thêm": "ADD"
   },
   "Dịch thuật": {
     "Công chứng bản dịch": "CNBD",
     "Xin cấp hộ hồ sơ": "XCHS"
   }
 };
+
+function normalizeServiceKey(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d").replace(/Đ/g, "D")
+    .replace(/[\s_]+/g, " ")
+    .replace(/[–—-]/g, "-")
+    .replace(/\s*\/\s*/g, "/")
+    .trim()
+    .toLowerCase();
+}
+
+const SERVICE_CODE_BY_NAME = Object.values(SERVICE_MAPPING).reduce((acc, serviceGroup) => {
+  Object.entries(serviceGroup).forEach(([serviceName, code]) => {
+    acc[normalizeServiceKey(serviceName)] = code;
+  });
+  return acc;
+}, {});
+
+function resolveServiceCodePrefix(loaiDichVu, danhMuc, tenDichVu = "") {
+  const rawDanhMuc = String(danhMuc || "").trim();
+  const rawTenDichVu = String(tenDichVu || "").trim();
+  const mainCategory = rawDanhMuc ? rawDanhMuc.split(" + ")[0].trim() : "";
+
+  const candidates = [
+    mainCategory,
+    mainCategory ? mainCategory.split(",")[0].trim() : "",
+    rawTenDichVu,
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const normalized = normalizeServiceKey(candidate);
+    if (normalized && SERVICE_CODE_BY_NAME[normalized]) {
+      return SERVICE_CODE_BY_NAME[normalized];
+    }
+
+    if (loaiDichVu && SERVICE_MAPPING[loaiDichVu] && SERVICE_MAPPING[loaiDichVu][candidate]) {
+      return SERVICE_MAPPING[loaiDichVu][candidate];
+    }
+  }
+
+  return "";
+}
+
+function replacePrefixKeepingSuffix(currentCode, newPrefix) {
+  const match = String(currentCode || "")
+    .trim()
+    .match(/^[^-]+-(\d{6})-([YNyn])-([0-9]{3})$/);
+
+  if (!match || !newPrefix) return "";
+  return `${newPrefix}-${match[1]}-${match[2].toUpperCase()}-${match[3]}`;
+}
+
+function getPrimaryServiceNameFromDetails(details) {
+  try {
+    const parsed = typeof details === "string" ? JSON.parse(details) : details;
+    if (!parsed) return "";
+
+    if (Array.isArray(parsed?.services) && parsed.services.length > 0) {
+      const firstName = String(parsed.services[0]?.name || "").trim();
+      if (firstName) return firstName;
+    }
+
+    if (Array.isArray(parsed?.sub) && parsed.sub.length > 0) {
+      const firstSubName = String(parsed.sub[0]?.name || "").trim();
+      if (firstSubName) return firstSubName;
+    }
+  } catch (_) {}
+
+  return "";
+}
 
 
 function getInitialsService(str) {
@@ -126,13 +199,8 @@ function getInitialsService(str) {
 
 
 
-async function generateServiceCode(supabase, loaiDichVu, yeuCauHoaDon, danhMuc) {
-  let prefix = "";
-  const mainCategory = danhMuc ? danhMuc.split(" + ")[0].trim() : "";
-
-  if (loaiDichVu && mainCategory && SERVICE_MAPPING[loaiDichVu] && SERVICE_MAPPING[loaiDichVu][mainCategory]) {
-    prefix = SERVICE_MAPPING[loaiDichVu][mainCategory];
-  }
+async function generateServiceCode(supabase, loaiDichVu, yeuCauHoaDon, danhMuc, tenDichVu = "") {
+  let prefix = resolveServiceCodePrefix(loaiDichVu, danhMuc, tenDichVu);
 
   if (!prefix) {
      const cleanLoai = loaiDichVu ? loaiDichVu.trim() : "";
@@ -171,16 +239,8 @@ async function generateServiceCode(supabase, loaiDichVu, yeuCauHoaDon, danhMuc) 
 }
 
 
-async function generateB2CServiceCode(supabase, loaiDichVu, yeuCauHoaDon, danhMuc) {
-  let prefix = "";
-  
-
-  const mainCategory = danhMuc ? danhMuc.split(" + ")[0].trim() : "";
-
-  
-  if (loaiDichVu && mainCategory && SERVICE_MAPPING[loaiDichVu] && SERVICE_MAPPING[loaiDichVu][mainCategory]) {
-    prefix = SERVICE_MAPPING[loaiDichVu][mainCategory];
-  }
+async function generateB2CServiceCode(supabase, loaiDichVu, yeuCauHoaDon, danhMuc, tenDichVu = "") {
+  let prefix = resolveServiceCodePrefix(loaiDichVu, danhMuc, tenDichVu);
 
   if (!prefix) {
      const cleanLoai = loaiDichVu ? loaiDichVu.trim() : "";
@@ -579,6 +639,17 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
       NgayKetThuc
     } = req.body; 
 
+    const normalizeNullable = (value) => {
+      if (value === undefined || value === null) return null;
+      if (typeof value === "string" && value.trim() === "") return null;
+      return value;
+    };
+
+    const safeChonNgay = normalizeNullable(ChonNgay);
+    const safeGio = normalizeNullable(Gio);
+    const safeNgayBatDau = normalizeNullable(NgayBatDau);
+    const safeNgayKetThuc = normalizeNullable(NgayKetThuc);
+
     // --- 1. TÍNH TOÁN DOANH THU & CHIẾT KHẤU ---
     let totalRevenue = 0;
     let totalDiscountAmt = 0;
@@ -626,7 +697,13 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
     
  
     if (!newServiceCode || newServiceCode.length < 5) {
-         newServiceCode = await generateB2CServiceCode(supabase, LoaiDichVu || currentReq.LoaiDichVu, currentReq.Invoice, DanhMuc || currentReq.DanhMuc);
+         newServiceCode = await generateB2CServiceCode(
+          supabase,
+          LoaiDichVu || currentReq.LoaiDichVu,
+          currentReq.Invoice,
+          DanhMuc || currentReq.DanhMuc,
+          TenDichVu || currentReq.TenDichVu
+        );
     }
 
 
@@ -634,7 +711,7 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
       .from("YeuCau")
       .update({
         HoTen, SoDienThoai, Email, MaVung, LoaiDichVu, TenDichVu, GoiDichVu,
-        TenHinhThuc, CoSoTuVan, ChonNgay, Gio, NoiDung, GhiChu, DanhMuc,
+        TenHinhThuc, CoSoTuVan, ChonNgay: safeChonNgay, Gio: safeGio, NoiDung, GhiChu, DanhMuc,
         MaHoSo: newServiceCode,
         NguoiPhuTrachId: NguoiPhuTrachId || userId,
         ChiTietDichVu: details,
@@ -643,8 +720,8 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
         SoTienChietKhau: totalDiscountAmt,
         DoanhThuSauChietKhau: currentNetRevenue,
         TongDoanhThuTichLuy: newTongDoanhThuTichLuy,
-        NgayBatDau: NgayBatDau || null, 
-        NgayKetThuc: NgayKetThuc || null 
+        NgayBatDau: safeNgayBatDau, 
+        NgayKetThuc: safeNgayKetThuc 
       })
       .eq("YeuCauID", id)
       .select().single();
@@ -2097,13 +2174,67 @@ app.get("/api/b2b/services", async (req, res) => {
 
     if (error) throw error;
 
+    const isPendingServiceStatus = (statusValue) => {
+      const normalized = String(statusValue || "")
+        .trim()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase();
+
+      return (
+        normalized.includes("cho") ||
+        normalized.includes("pending") ||
+        normalized.includes("dang ky moi")
+      );
+    };
+
+    for (const item of data || []) {
+      if (isPendingServiceStatus(item.TrangThai)) continue;
+
+      const currentCode = String(item.ServiceID || "").trim();
+      const shouldFixCode = !currentCode || /^OT-/i.test(currentCode);
+
+      if (!shouldFixCode) continue;
+
+      const resolvedPrefix = resolveServiceCodePrefix(
+        item.LoaiDichVu,
+        item.DanhMuc,
+        item.TenDichVu
+      );
+
+      if (!resolvedPrefix) continue;
+
+      let fixedCode = replacePrefixKeepingSuffix(currentCode, resolvedPrefix);
+      if (!fixedCode) {
+        fixedCode = await generateServiceCode(
+          supabase,
+          item.LoaiDichVu,
+          item.YeuCauHoaDon,
+          item.DanhMuc,
+          item.TenDichVu
+        );
+      }
+
+      if (!fixedCode || fixedCode === currentCode) continue;
+
+      const { error: fixErr } = await supabase
+        .from("B2B_SERVICES")
+        .update({
+          ServiceID: fixedCode,
+          UpdatedAt: new Date().toISOString()
+        })
+        .eq("STT", item.STT);
+
+      if (!fixErr) item.ServiceID = fixedCode;
+    }
+
     const formattedData = data.map(item => ({
       ID: item.STT,
       DoanhNghiepID: item.DoanhNghiepID,
       SoDKKD: item.DoanhNghiep?.SoDKKD || "", 
       TenDoanhNghiep: item.DoanhNghiep?.TenDoanhNghiep || "",
       DanhMuc: item.DanhMuc,
-      MaDichVu: item.ServiceID,
+      MaDichVu: !isPendingServiceStatus(item.TrangThai) ? (item.ServiceID || "") : "",
       LoaiDichVu: item.LoaiDichVu,
       TenDichVu: item.TenDichVu,
       DiaChiNhan: item.DiaChiNhan || "",
@@ -2161,6 +2292,162 @@ app.get("/api/b2b/services/wallet", async (req, res) => {
   }
 });
 
+app.post("/api/b2b/services/backfill-codes", async (req, res) => {
+  try {
+    const { userId, dryRun = false } = req.body || {};
+
+    if (!userId) {
+      return res.status(400).json({ success: false, message: "Thiếu userId" });
+    }
+
+    const { data: actor, error: actorErr } = await supabase
+      .from("User")
+      .select("id, is_admin, is_director, perm_approve_b2b")
+      .eq("id", userId)
+      .single();
+
+    if (actorErr || !actor) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy người dùng thực hiện" });
+    }
+
+    const canBackfill = actor.is_admin || actor.is_director || actor.perm_approve_b2b;
+    if (!canBackfill) {
+      return res.status(403).json({ success: false, message: "Bạn không có quyền chạy backfill mã dịch vụ" });
+    }
+
+    const { data: candidates, error: fetchErr } = await supabase
+      .from("B2B_SERVICES")
+      .select("STT, ServiceID, LoaiDichVu, DanhMuc, TenDichVu, YeuCauHoaDon")
+      .or("ServiceID.ilike.OT-%,ServiceID.is.null,ServiceID.eq.")
+      .order("STT", { ascending: true });
+
+    if (fetchErr) throw fetchErr;
+
+    if (!candidates || candidates.length === 0) {
+      return res.json({
+        success: true,
+        message: "Không có mã OT/rỗng cần backfill",
+        total: 0,
+        updated: 0,
+        skipped: 0,
+        dryRun: !!dryRun,
+        sample: []
+      });
+    }
+
+    const sample = [];
+    let updated = 0;
+    let skipped = 0;
+
+    for (const row of candidates) {
+      const loaiDichVu = row.LoaiDichVu || "";
+      const danhMuc = row.DanhMuc || "";
+      const tenDichVu = row.TenDichVu || "";
+
+      if (!loaiDichVu || (!danhMuc && !tenDichVu)) {
+        skipped += 1;
+        if (sample.length < 30) {
+          sample.push({
+            STT: row.STT,
+            oldCode: row.ServiceID || null,
+            newCode: null,
+            status: "skipped",
+            reason: "Thiếu dữ liệu để sinh mã"
+          });
+        }
+        continue;
+      }
+
+      const resolvedPrefix = resolveServiceCodePrefix(loaiDichVu, danhMuc, tenDichVu);
+      if (!resolvedPrefix) {
+        skipped += 1;
+        if (sample.length < 30) {
+          sample.push({
+            STT: row.STT,
+            oldCode: row.ServiceID || null,
+            newCode: null,
+            status: "skipped",
+            reason: "Không xác định được prefix mã dịch vụ"
+          });
+        }
+        continue;
+      }
+
+      let newCode = replacePrefixKeepingSuffix(row.ServiceID, resolvedPrefix);
+      if (!newCode) {
+        newCode = await generateServiceCode(
+          supabase,
+          loaiDichVu,
+          row.YeuCauHoaDon,
+          danhMuc,
+          tenDichVu
+        );
+      }
+
+      if (!newCode) {
+        skipped += 1;
+        if (sample.length < 30) {
+          sample.push({
+            STT: row.STT,
+            oldCode: row.ServiceID || null,
+            newCode: null,
+            status: "skipped",
+            reason: "Không sinh được mã mới"
+          });
+        }
+        continue;
+      }
+
+      if (!dryRun) {
+        const { error: updateErr } = await supabase
+          .from("B2B_SERVICES")
+          .update({
+            ServiceID: newCode,
+            UpdatedAt: new Date().toISOString()
+          })
+          .eq("STT", row.STT);
+
+        if (updateErr) {
+          skipped += 1;
+          if (sample.length < 30) {
+            sample.push({
+              STT: row.STT,
+              oldCode: row.ServiceID || null,
+              newCode,
+              status: "skipped",
+              reason: updateErr.message
+            });
+          }
+          continue;
+        }
+      }
+
+      updated += 1;
+      if (sample.length < 30) {
+        sample.push({
+          STT: row.STT,
+          oldCode: row.ServiceID || null,
+          newCode,
+          status: dryRun ? "preview" : "updated"
+        });
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: dryRun ? "Preview backfill thành công" : "Backfill mã dịch vụ thành công",
+      total: candidates.length,
+      updated,
+      skipped,
+      dryRun: !!dryRun,
+      sample
+    });
+  } catch (err) {
+    console.error("❌ Lỗi backfill mã dịch vụ B2B:", err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 
 app.post("/api/b2b/services", async (req, res) => {
   try {
@@ -2186,10 +2473,11 @@ app.post("/api/b2b/services", async (req, res) => {
     let finalServiceCode = null;
 
 
-    let finalStatus = TrangThai; 
+    let finalStatus = TrangThai;
     
 
     if (approveAction === "accountant_approve") {
+      finalStatus = "Đã duyệt";
         if (userId) {
             const { data: userCheck } = await supabase
                 .from("User")
@@ -2197,7 +2485,18 @@ app.post("/api/b2b/services", async (req, res) => {
                 .eq("id", userId)
                 .single();
             
-            if (userCheck && (userCheck.is_director || userCheck.perm_approve_b2b )) {
+            const canApproveB2B = Boolean(
+              userCheck?.is_admin ||
+              userCheck?.is_director ||
+              userCheck?.is_accountant ||
+              userCheck?.perm_approve_b2b
+            );
+
+            if (!canApproveB2B) {
+              return res.status(403).json({ success: false, message: "Bạn không có quyền duyệt dịch vụ B2B." });
+            }
+
+            if (canApproveB2B) {
                 
                 // Trừ tiền ví nếu có
                 if (viTien > 0) {
@@ -2222,7 +2521,8 @@ app.post("/api/b2b/services", async (req, res) => {
                     supabase,
                     LoaiDichVu,
                     YeuCauHoaDon,
-                    DanhMuc || ""
+                  DanhMuc || "",
+                  TenDichVu || ""
                 );
             }
         }
@@ -2302,16 +2602,25 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
     if (!current) return res.status(404).json({ success: false, message: "Không tìm thấy dịch vụ" });
     
     let finalMaDichVu = current.ServiceID;
+    let finalTrangThai = TrangThai || current.TrangThai;
 
     if (approveAction === "accountant_approve") {
+      finalTrangThai = "Đã duyệt";
       if (userId) {
          const { data: userCheck } = await supabase
             .from("User")
-            .select("is_director, perm_approve_b2b")
+            .select("is_admin, is_director, is_accountant, perm_approve_b2b")
             .eq("id", userId)
             .single();
+
+          const canApproveB2B = Boolean(
+            userCheck?.is_admin ||
+            userCheck?.is_director ||
+            userCheck?.is_accountant ||
+            userCheck?.perm_approve_b2b
+          );
             
-          if (!userCheck || (!userCheck.is_director && !userCheck.perm_approve_b2b)) {
+          if (!canApproveB2B) {
               return res.status(403).json({ success: false, message: "Bạn không có quyền duyệt dịch vụ B2B." });
           }
       }
@@ -2402,7 +2711,8 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
         supabase,
         LoaiDichVu || current.LoaiDichVu,
         YeuCauHoaDon || current.YeuCauHoaDon,
-        DanhMuc || current.DanhMuc 
+        DanhMuc || current.DanhMuc,
+        TenDichVu || current.TenDichVu
       );
 
      
@@ -2439,7 +2749,7 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
       ServiceID: finalMaDichVu,
       NgayThucHien: NgayThucHien || current.NgayThucHien,
       NgayHoanThanh: NgayHoanThanh || current.NgayHoanThanh,
-      TrangThai: TrangThai || current.TrangThai,
+      TrangThai: finalTrangThai,
 
       DoanhThuTruocChietKhau: req.body.DoanhThuTruocChietKhau ?? current.DoanhThuTruocChietKhau,
       DoanhThuSauChietKhau: req.body.DoanhThuSauChietKhau ?? current.DoanhThuSauChietKhau,
@@ -3193,6 +3503,48 @@ app.get("/api/yeucau", async (req, res) => {
     const { data, count, error } = await query;
     if (error) throw error;
 
+    for (const item of data || []) {
+      const currentCode = String(item.MaHoSo || "").trim();
+      if (!currentCode) continue;
+
+      const serviceNameForMapping =
+        String(item.TenDichVu || "").trim() || getPrimaryServiceNameFromDetails(item.ChiTietDichVu);
+
+      const resolvedPrefix = resolveServiceCodePrefix(
+        item.LoaiDichVu,
+        item.DanhMuc,
+        serviceNameForMapping
+      );
+      if (!resolvedPrefix) continue;
+
+      const hasWrongPrefix = !currentCode.startsWith(`${resolvedPrefix}-`);
+      const shouldFixCode = /^OT-/i.test(currentCode) || hasWrongPrefix;
+      if (!shouldFixCode) continue;
+
+      let fixedCode = replacePrefixKeepingSuffix(currentCode, resolvedPrefix);
+      if (!fixedCode) {
+        fixedCode = await generateB2CServiceCode(
+          supabase,
+          item.LoaiDichVu,
+          item.Invoice || item.YeuCauXuatHoaDon || item.YeuCauHoaDon,
+          item.DanhMuc,
+          serviceNameForMapping
+        );
+      }
+
+      if (!fixedCode || fixedCode === currentCode) continue;
+
+      const { error: fixErr } = await supabase
+        .from("YeuCau")
+        .update({
+          MaHoSo: fixedCode,
+          UpdatedAt: new Date().toISOString()
+        })
+        .eq("YeuCauID", item.YeuCauID);
+
+      if (!fixErr) item.MaHoSo = fixedCode;
+    }
+
  
     let revenueQuery = supabase.from("YeuCau").select("DoanhThuSauChietKhau");
 
@@ -3489,7 +3841,6 @@ app.post("/api/yeucau", async (req, res) => {
   try {
 
     const { 
-        autoApprove, 
         currentUserId, 
         ConfirmPassword,
         DoanhThuTruocChietKhau, 
@@ -3503,7 +3854,7 @@ app.post("/api/yeucau", async (req, res) => {
     let newRequestData = { ...restData, ChiTietDichVu,NgayBatDau: NgayBatDau || null, 
         NgayKetThuc: NgayKetThuc || null };
 
-    console.log("[CMS] Tạo yêu cầu mới. AutoApprove:", autoApprove);
+    console.log("[CMS] Tạo yêu cầu mới (chờ duyệt)");
 
     // Xử lý dữ liệu rỗng
     for (const key of Object.keys(newRequestData)) {
@@ -3517,40 +3868,15 @@ app.post("/api/yeucau", async (req, res) => {
     }
  
     if (!newRequestData.NgayTao) newRequestData.NgayTao = new Date().toISOString();
-    if (autoApprove === true || autoApprove === "true") {
-        // a. Tính toán tài chính
-        const dtTruoc = parseInt(DoanhThuTruocChietKhau) || 0;
-        const phanTram = parseFloat(MucChietKhau) || 0;
-        
-        const tienChietKhau = Math.round((dtTruoc * phanTram) / 100);
-        
-      
-        const dtSau = dtTruoc - tienChietKhau; 
+    newRequestData.TrangThai = "Đăng ký mới";
+    newRequestData.MaHoSo = null;
+    newRequestData.DoanhThuTruocChietKhau = 0;
+    newRequestData.DoanhThuSauChietKhau = 0;
+    newRequestData.SoTienChietKhau = 0;
+    newRequestData.MucChietKhau = 0;
 
-        
-        const newCode = await generateB2CServiceCode(
-            supabase, 
-            newRequestData.LoaiDichVu, 
-            newRequestData.Invoice || newRequestData.YeuCauHoaDon, 
-            newRequestData.DanhMuc
-        );
-
-  
-        newRequestData.MaHoSo = newCode;
-        newRequestData.DoanhThuTruocChietKhau = dtTruoc;
-        newRequestData.MucChietKhau = phanTram;
-        newRequestData.SoTienChietKhau = tienChietKhau;
-        newRequestData.DoanhThuSauChietKhau = dtSau;
-        
-        if (!newRequestData.NguoiPhuTrachId && currentUserId) {
-            newRequestData.NguoiPhuTrachId = parseInt(currentUserId);
-        }
-    } else {
-        // Nếu không auto approve thì reset về 0
-        newRequestData.DoanhThuTruocChietKhau = 0;
-        newRequestData.DoanhThuSauChietKhau = 0;
-        newRequestData.SoTienChietKhau = 0;
-        newRequestData.MucChietKhau = 0;
+    if (!newRequestData.NguoiPhuTrachId && currentUserId) {
+      newRequestData.NguoiPhuTrachId = parseInt(currentUserId);
     }
 
     // 4. Insert vào DB
@@ -3567,9 +3893,7 @@ app.post("/api/yeucau", async (req, res) => {
     res.json({
       success: true,
       data: data,
-      message: (autoApprove === true || autoApprove === "true") 
-        ? `Đăng ký & Cấp mã thành công: ${data.MaHoSo}` 
-        : "Đăng ký dịch vụ mới thành công",
+      message: "Đăng ký dịch vụ mới thành công, hồ sơ đang chờ duyệt",
     });
 
   } catch (err) {
