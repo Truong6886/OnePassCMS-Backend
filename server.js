@@ -196,10 +196,52 @@ function getInitialsService(str) {
     ?.join('').toUpperCase().slice(0, 4) || "OT";
 }
 
+function formatServiceCodeDate(submissionDate) {
+  const raw = String(submissionDate || "").trim();
+  const directMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (directMatch) {
+    const [, yyyy, mm, dd] = directMatch;
+    return `${yyyy.slice(-2)}${mm}${dd}`;
+  }
+
+  // Handle localized day-first formats like 14/3/2026 or 14-03-2026.
+  const dayFirstMatch = raw.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+  if (dayFirstMatch) {
+    const [, dd, mm, yyyy] = dayFirstMatch;
+    const paddedMonth = String(mm).padStart(2, "0");
+    const paddedDay = String(dd).padStart(2, "0");
+    return `${String(yyyy).slice(-2)}${paddedMonth}${paddedDay}`;
+  }
+
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    const yy = String(parsed.getUTCFullYear()).slice(-2);
+    const mm = String(parsed.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(parsed.getUTCDate()).padStart(2, "0");
+    return `${yy}${mm}${dd}`;
+  }
+
+  const now = new Date();
+  const yy = now.getFullYear().toString().slice(-2);
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  return `${yy}${mm}${dd}`;
+}
+
+function resolveSubmissionDateForCode(...candidates) {
+  for (const value of candidates) {
+    if (value === undefined || value === null) continue;
+    const raw = String(value).trim();
+    if (!raw) continue;
+    return value;
+  }
+  return null;
+}
 
 
 
-async function generateServiceCode(supabase, loaiDichVu, yeuCauHoaDon, danhMuc, tenDichVu = "") {
+
+async function generateServiceCode(supabase, loaiDichVu, yeuCauHoaDon, danhMuc, tenDichVu = "", submissionDate = null) {
   let prefix = resolveServiceCodePrefix(loaiDichVu, danhMuc, tenDichVu);
 
   if (!prefix) {
@@ -207,11 +249,7 @@ async function generateServiceCode(supabase, loaiDichVu, yeuCauHoaDon, danhMuc, 
      prefix =  getInitialsService(cleanLoai); 
   }
 
-  const now = new Date();
-  const yy = now.getFullYear().toString().slice(-2);
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const dd = String(now.getDate()).padStart(2, '0');
-  const dateStr = `${yy}${mm}${dd}`; 
+  const dateStr = formatServiceCodeDate(submissionDate);
 
   const isInvoice = ["yes", "có", "true", "y"].includes(String(yeuCauHoaDon).toLowerCase());
   const invoiceCode = isInvoice ? "Y" : "N";
@@ -239,7 +277,7 @@ async function generateServiceCode(supabase, loaiDichVu, yeuCauHoaDon, danhMuc, 
 }
 
 
-async function generateB2CServiceCode(supabase, loaiDichVu, yeuCauHoaDon, danhMuc, tenDichVu = "") {
+async function generateB2CServiceCode(supabase, loaiDichVu, yeuCauHoaDon, danhMuc, tenDichVu = "", submissionDate = null) {
   let prefix = resolveServiceCodePrefix(loaiDichVu, danhMuc, tenDichVu);
 
   if (!prefix) {
@@ -250,11 +288,7 @@ async function generateB2CServiceCode(supabase, loaiDichVu, yeuCauHoaDon, danhMu
   if (!prefix) prefix = "OT";
 
 
-  const now = new Date();
-  const yy = now.getFullYear().toString().slice(-2);
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const dd = String(now.getDate()).padStart(2, '0');
-  const dateStr = `${yy}${mm}${dd}`; 
+  const dateStr = formatServiceCodeDate(submissionDate);
 
   const isInvoice = ["yes", "có", "true", "y"].includes(String(yeuCauHoaDon).toLowerCase());
   const invoiceCode = isInvoice ? "Y" : "N";
@@ -491,6 +525,13 @@ const handleSupabaseError = (error) => {
   if (error) throw new Error(error.message || "Supabase error");
 };
 
+const flagEnabled = (value) => value === true || value === 1 || value === "1" || value === "true";
+const isDisabledEmployeeAccount = (user) =>
+  !flagEnabled(user?.is_admin) &&
+  !flagEnabled(user?.is_director) &&
+  !flagEnabled(user?.is_accountant) &&
+  !flagEnabled(user?.is_staff);
+
 const verifySession = async (req, res, next) => {
   try {
 
@@ -506,7 +547,7 @@ const verifySession = async (req, res, next) => {
 
     const { data, error } = await supabase
       .from("User")
-      .select("session_token")
+      .select("session_token, is_admin, is_director, is_accountant, is_staff")
       .eq("id", userId)
       .single();
 
@@ -520,6 +561,14 @@ const verifySession = async (req, res, next) => {
         success: false, 
         message: "Tài khoản đã được đăng nhập ở nơi khác. Vui lòng đăng nhập lại.", 
         code: "SESSION_EXPIRED" 
+      });
+    }
+
+    if (isDisabledEmployeeAccount(data)) {
+      return res.status(401).json({
+        success: false,
+        message: "Tài khoản của bạn đã bị vô hiệu hóa. Vui lòng liên hệ quản trị viên.",
+        code: "ACCOUNT_DISABLED"
       });
     }
 
@@ -694,15 +743,52 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
 
     const { data: currentReq } = await supabase.from("YeuCau").select("*").eq("YeuCauID", id).single();
     let newServiceCode = currentReq.MaHoSo;
+    const serviceNameForCode =
+      String(TenDichVu || currentReq.TenDichVu || "").trim() || getPrimaryServiceNameFromDetails(details || currentReq.ChiTietDichVu);
+    const submissionDateForCode = resolveSubmissionDateForCode(
+      safeNgayBatDau,
+      safeChonNgay,
+      req.body.NgayNopHoSo,
+      currentReq.NgayBatDau,
+      currentReq.ChonNgay,
+      currentReq.NgayNopHoSo,
+      currentReq.CreatedAt
+    );
+    const invoiceSourceForCode =
+      req.body.Invoice ??
+      req.body.YeuCauXuatHoaDon ??
+      req.body.YeuCauHoaDon ??
+      currentReq.Invoice ??
+      currentReq.YeuCauXuatHoaDon ??
+      currentReq.YeuCauHoaDon;
+
+    const expectedPrefix = resolveServiceCodePrefix(
+      LoaiDichVu || currentReq.LoaiDichVu,
+      DanhMuc || currentReq.DanhMuc,
+      serviceNameForCode
+    );
+    const expectedDateStr = formatServiceCodeDate(submissionDateForCode);
+    const expectedInvoiceCode = ["yes", "có", "true", "y"].includes(String(invoiceSourceForCode).toLowerCase()) ? "Y" : "N";
+
+    const currentCodeMatch = String(newServiceCode || "")
+      .trim()
+      .match(/^([^-]+)-(\d{6})-([YNyn])-([0-9]{3})$/);
+
+    const shouldRegenerateCode =
+      !currentCodeMatch ||
+      (expectedPrefix && currentCodeMatch[1].toUpperCase() !== expectedPrefix.toUpperCase()) ||
+      currentCodeMatch[2] !== expectedDateStr ||
+      currentCodeMatch[3].toUpperCase() !== expectedInvoiceCode;
     
  
-    if (!newServiceCode || newServiceCode.length < 5) {
+    if (shouldRegenerateCode) {
          newServiceCode = await generateB2CServiceCode(
           supabase,
           LoaiDichVu || currentReq.LoaiDichVu,
-          currentReq.Invoice,
+          invoiceSourceForCode,
           DanhMuc || currentReq.DanhMuc,
-          TenDichVu || currentReq.TenDichVu
+          TenDichVu || currentReq.TenDichVu,
+          submissionDateForCode
         );
     }
 
@@ -2192,26 +2278,44 @@ app.get("/api/b2b/services", async (req, res) => {
       if (isPendingServiceStatus(item.TrangThai)) continue;
 
       const currentCode = String(item.ServiceID || "").trim();
-      const shouldFixCode = !currentCode || /^OT-/i.test(currentCode);
-
-      if (!shouldFixCode) continue;
-
       const resolvedPrefix = resolveServiceCodePrefix(
         item.LoaiDichVu,
         item.DanhMuc,
         item.TenDichVu
       );
 
-      if (!resolvedPrefix) continue;
+      const currentCodeMatch = currentCode.match(/^([^-]+)-(\d{6})-([YNyn])-([0-9]{3})$/);
+      const effectivePrefix = resolvedPrefix || (currentCodeMatch ? currentCodeMatch[1] : "");
+      if (!effectivePrefix) continue;
 
-      let fixedCode = replacePrefixKeepingSuffix(currentCode, resolvedPrefix);
+      const submissionDateForCode = resolveSubmissionDateForCode(
+        item.NgayThucHien,
+        item.NgayBatDau,
+        item.ChonNgay,
+        item.NgayNopHoSo,
+        item.CreatedAt
+      );
+      const expectedDateStr = formatServiceCodeDate(submissionDateForCode);
+      const expectedInvoiceCode = ["yes", "có", "true", "y"].includes(String(item.YeuCauHoaDon).toLowerCase()) ? "Y" : "N";
+      const hasWrongPrefix = !!resolvedPrefix && !currentCode.startsWith(`${resolvedPrefix}-`);
+      const hasWrongDate = !currentCodeMatch || currentCodeMatch[2] !== expectedDateStr;
+      const hasWrongInvoice = !currentCodeMatch || currentCodeMatch[3].toUpperCase() !== expectedInvoiceCode;
+      const shouldFixCode = !currentCode || /^OT-/i.test(currentCode) || hasWrongPrefix || hasWrongDate || hasWrongInvoice;
+
+      if (!shouldFixCode) continue;
+
+      let fixedCode = replacePrefixKeepingSuffix(currentCode, effectivePrefix);
+      if (fixedCode && currentCodeMatch) {
+        fixedCode = `${effectivePrefix}-${expectedDateStr}-${expectedInvoiceCode}-${currentCodeMatch[4]}`;
+      }
       if (!fixedCode) {
         fixedCode = await generateServiceCode(
           supabase,
           item.LoaiDichVu,
           item.YeuCauHoaDon,
           item.DanhMuc,
-          item.TenDichVu
+          item.TenDichVu,
+          submissionDateForCode
         );
       }
 
@@ -2317,7 +2421,7 @@ app.post("/api/b2b/services/backfill-codes", async (req, res) => {
 
     const { data: candidates, error: fetchErr } = await supabase
       .from("B2B_SERVICES")
-      .select("STT, ServiceID, LoaiDichVu, DanhMuc, TenDichVu, YeuCauHoaDon")
+      .select("STT, ServiceID, LoaiDichVu, DanhMuc, TenDichVu, YeuCauHoaDon, NgayThucHien, NgayBatDau, CreatedAt")
       .or("ServiceID.ilike.OT-%,ServiceID.is.null,ServiceID.eq.")
       .order("STT", { ascending: true });
 
@@ -2380,7 +2484,8 @@ app.post("/api/b2b/services/backfill-codes", async (req, res) => {
           loaiDichVu,
           row.YeuCauHoaDon,
           danhMuc,
-          tenDichVu
+          tenDichVu,
+          resolveSubmissionDateForCode(row.NgayThucHien, row.NgayBatDau, row.CreatedAt)
         );
       }
 
@@ -2464,6 +2569,14 @@ app.post("/api/b2b/services", async (req, res) => {
       return res.status(400).json({ success: false, message: "Thiếu dữ liệu bắt buộc" });
     }
 
+    const resolvedNgayThucHien = resolveSubmissionDateForCode(
+      NgayThucHien,
+      req.body.NgayBatDau,
+      req.body.ChonNgay,
+      req.body.NgayNopHoSo,
+      new Date().toISOString()
+    );
+
     const dtTruoc = DoanhThuTruocChietKhau ? parseInt(DoanhThuTruocChietKhau) : 0;
     const viTien = Vi ? parseInt(Vi) : 0;
     const phanTramCK = MucChietKhau ? parseFloat(MucChietKhau) : 0; 
@@ -2522,7 +2635,8 @@ app.post("/api/b2b/services", async (req, res) => {
                     LoaiDichVu,
                     YeuCauHoaDon,
                   DanhMuc || "",
-                  TenDichVu || ""
+                  TenDichVu || "",
+                  resolvedNgayThucHien
                 );
             }
         }
@@ -2538,7 +2652,7 @@ app.post("/api/b2b/services", async (req, res) => {
         TenDichVu: TenDichVu || "",
         DiaChiNhan: DiaChiNhan || "",
         ServiceID: finalServiceCode, 
-        NgayThucHien,
+        NgayThucHien: resolvedNgayThucHien,
         NgayHoanThanh: NgayHoanThanh || null, 
         GhiChu: GhiChu || "",
         NguoiPhuTrachId: NguoiPhuTrachId || null, 
@@ -2600,6 +2714,16 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
       .single();
 
     if (!current) return res.status(404).json({ success: false, message: "Không tìm thấy dịch vụ" });
+
+    const resolvedNgayThucHien = resolveSubmissionDateForCode(
+      NgayThucHien,
+      req.body.NgayBatDau,
+      req.body.ChonNgay,
+      req.body.NgayNopHoSo,
+      current.NgayThucHien,
+      current.NgayBatDau,
+      current.CreatedAt
+    );
     
     let finalMaDichVu = current.ServiceID;
     let finalTrangThai = TrangThai || current.TrangThai;
@@ -2712,7 +2836,8 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
         LoaiDichVu || current.LoaiDichVu,
         YeuCauHoaDon || current.YeuCauHoaDon,
         DanhMuc || current.DanhMuc,
-        TenDichVu || current.TenDichVu
+        TenDichVu || current.TenDichVu,
+        resolvedNgayThucHien
       );
 
      
@@ -2747,7 +2872,7 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
       TenDichVu: TenDichVu || current.TenDichVu,
       DiaChiNhan: DiaChiNhan || current.DiaChiNhan,
       ServiceID: finalMaDichVu,
-      NgayThucHien: NgayThucHien || current.NgayThucHien,
+      NgayThucHien: resolvedNgayThucHien,
       NgayHoanThanh: NgayHoanThanh || current.NgayHoanThanh,
       TrangThai: finalTrangThai,
 
@@ -3230,6 +3355,16 @@ app.put("/api/yeucau/:id", async (req, res) => {
         ...restData     
     } = req.body;
 
+    const { data: currentReq, error: currentReqErr } = await supabase
+      .from("YeuCau")
+      .select("*")
+      .eq("YeuCauID", id)
+      .single();
+
+    if (currentReqErr || !currentReq) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy yêu cầu" });
+    }
+
 
     let updatePayload = { 
         ...restData, 
@@ -3306,6 +3441,54 @@ app.put("/api/yeucau/:id", async (req, res) => {
         updatePayload.NguoiPhuTrachId = parseInt(updatePayload.NguoiPhuTrachId);
     } else {
         updatePayload.NguoiPhuTrachId = null;
+    }
+
+    const nextLoaiDichVu = updatePayload.LoaiDichVu ?? currentReq.LoaiDichVu;
+    const nextDanhMuc = updatePayload.DanhMuc ?? currentReq.DanhMuc;
+    const detailsForName = updatePayload.ChiTietDichVu ?? currentReq.ChiTietDichVu;
+    const nextTenDichVu =
+      String(updatePayload.TenDichVu ?? currentReq.TenDichVu ?? "").trim() ||
+      getPrimaryServiceNameFromDetails(detailsForName);
+    const nextNgayBatDau = resolveSubmissionDateForCode(
+      updatePayload.NgayBatDau,
+      updatePayload.ChonNgay,
+      updatePayload.NgayNopHoSo,
+      currentReq.NgayBatDau,
+      currentReq.ChonNgay,
+      currentReq.NgayNopHoSo,
+      currentReq.CreatedAt
+    );
+    const nextInvoiceSource =
+      updatePayload.Invoice ??
+      updatePayload.YeuCauXuatHoaDon ??
+      updatePayload.YeuCauHoaDon ??
+      currentReq.Invoice ??
+      currentReq.YeuCauXuatHoaDon ??
+      currentReq.YeuCauHoaDon;
+
+    const currentCode = String(updatePayload.MaHoSo ?? currentReq.MaHoSo ?? "").trim();
+    if (currentCode) {
+      const expectedPrefix = resolveServiceCodePrefix(nextLoaiDichVu, nextDanhMuc, nextTenDichVu);
+      const expectedDateStr = formatServiceCodeDate(nextNgayBatDau);
+      const expectedInvoiceCode = ["yes", "có", "true", "y"].includes(String(nextInvoiceSource).toLowerCase()) ? "Y" : "N";
+
+      const currentCodeMatch = currentCode.match(/^([^-]+)-(\d{6})-([YNyn])-([0-9]{3})$/);
+      const shouldRegenerateCode =
+        !currentCodeMatch ||
+        (expectedPrefix && currentCodeMatch[1].toUpperCase() !== expectedPrefix.toUpperCase()) ||
+        currentCodeMatch[2] !== expectedDateStr ||
+        currentCodeMatch[3].toUpperCase() !== expectedInvoiceCode;
+
+      if (shouldRegenerateCode) {
+        updatePayload.MaHoSo = await generateB2CServiceCode(
+          supabase,
+          nextLoaiDichVu,
+          nextInvoiceSource,
+          nextDanhMuc,
+          nextTenDichVu,
+          nextNgayBatDau
+        );
+      }
     }
 
     // 4. Perform Update
@@ -3515,20 +3698,41 @@ app.get("/api/yeucau", async (req, res) => {
         item.DanhMuc,
         serviceNameForMapping
       );
-      if (!resolvedPrefix) continue;
+      const currentCodeMatch = currentCode.match(/^([^-]+)-(\d{6})-([YNyn])-([0-9]{3})$/);
+      const effectivePrefix = resolvedPrefix || (currentCodeMatch ? currentCodeMatch[1] : "");
+      if (!effectivePrefix) continue;
 
-      const hasWrongPrefix = !currentCode.startsWith(`${resolvedPrefix}-`);
-      const shouldFixCode = /^OT-/i.test(currentCode) || hasWrongPrefix;
+      const submissionDateForCode = resolveSubmissionDateForCode(
+        item.NgayBatDau,
+        item.ChonNgay,
+        item.NgayNopHoSo,
+        item.CreatedAt
+      );
+      const expectedDateStr = formatServiceCodeDate(submissionDateForCode);
+      const expectedInvoiceCode = ["yes", "có", "true", "y"].includes(
+        String(item.Invoice || item.YeuCauXuatHoaDon || item.YeuCauHoaDon).toLowerCase()
+      )
+        ? "Y"
+        : "N";
+      const hasWrongPrefix = !!resolvedPrefix && !currentCode.startsWith(`${resolvedPrefix}-`);
+      const hasWrongDate = !currentCodeMatch || currentCodeMatch[2] !== expectedDateStr;
+      const hasWrongInvoice = !currentCodeMatch || currentCodeMatch[3].toUpperCase() !== expectedInvoiceCode;
+      const shouldFixCode = /^OT-/i.test(currentCode) || hasWrongPrefix || hasWrongDate || hasWrongInvoice;
       if (!shouldFixCode) continue;
 
-      let fixedCode = replacePrefixKeepingSuffix(currentCode, resolvedPrefix);
+      let fixedCode = replacePrefixKeepingSuffix(currentCode, effectivePrefix);
+      if (fixedCode && currentCodeMatch) {
+        fixedCode = `${effectivePrefix}-${expectedDateStr}-${expectedInvoiceCode}-${currentCodeMatch[4]}`;
+      }
+
       if (!fixedCode) {
         fixedCode = await generateB2CServiceCode(
           supabase,
           item.LoaiDichVu,
           item.Invoice || item.YeuCauXuatHoaDon || item.YeuCauHoaDon,
           item.DanhMuc,
-          serviceNameForMapping
+          serviceNameForMapping,
+          resolveSubmissionDateForCode(item.NgayBatDau, item.ChonNgay, item.NgayNopHoSo, item.CreatedAt)
         );
       }
 
@@ -3959,6 +4163,14 @@ app.post("/api/login", async (req, res) => {
     const user = data[0];
     const match = await bcrypt.compare(password, user.password_hash);
     if (!match) return res.status(401).json({ success: false, message: "Sai mật khẩu" });
+
+    if (isDisabledEmployeeAccount(user)) {
+      return res.status(403).json({
+        success: false,
+        message: "Tài khoản của bạn đã bị vô hiệu hóa. Vui lòng liên hệ quản trị viên.",
+        code: "ACCOUNT_DISABLED"
+      });
+    }
 
 
     const sessionToken = crypto.randomBytes(32).toString("hex");
