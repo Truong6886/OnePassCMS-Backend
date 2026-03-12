@@ -11,12 +11,14 @@ import fetch from "node-fetch";
 import nodemailer from "nodemailer";
 import emailjs from '@emailjs/nodejs';
 import crypto from "crypto";
+import { promises as fs } from "fs";
 import path from "path";
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const DICHVU_FALLBACK_FILE = path.join(__dirname, "data", "dichvu-fallback.json");
 dotenv.config({ path: path.join(__dirname, '.env') });
 function getInitials(str) {
   if (!str) return "";
@@ -1063,24 +1065,219 @@ app.get("/api/email", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+function normalizeDichVuRecord(row = {}) {
+  const now = new Date().toISOString();
+  return {
+    DichVuID: row.DichVuID,
+    LoaiDichVu: String(row.LoaiDichVu || "").trim(),
+    TenDichVu: String(row.TenDichVu || "").trim(),
+    MaDichVu: String(row.MaDichVu || "").trim(),
+    GhiChu: String(row.GhiChu || "").trim(),
+    NgayTao: row.NgayTao || now,
+    NgayCapNhat: row.NgayCapNhat || now,
+    NguoiCapNhat: row.NguoiCapNhat || "System",
+  };
+}
+
+async function readDichVuFallbackStore() {
+  try {
+    const raw = await fs.readFile(DICHVU_FALLBACK_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map(normalizeDichVuRecord) : [];
+  } catch (err) {
+    if (err.code === "ENOENT") return [];
+    throw err;
+  }
+}
+
+async function writeDichVuFallbackStore(items) {
+  await fs.mkdir(path.dirname(DICHVU_FALLBACK_FILE), { recursive: true });
+  await fs.writeFile(DICHVU_FALLBACK_FILE, JSON.stringify(items, null, 2), "utf8");
+}
+
+function getDichVuKey(row = {}) {
+  const code = String(row.MaDichVu || "").trim().toLowerCase();
+  if (code) return `code:${code}`;
+  const type = String(row.LoaiDichVu || "").trim().toLowerCase();
+  const name = String(row.TenDichVu || "").trim().toLowerCase();
+  if (type || name) return `name:${type}:${name}`;
+  return `id:${row.DichVuID}`;
+}
+
+function mergeDichVuRows(primaryRows = [], fallbackRows = []) {
+  const seen = new Set();
+  const merged = [];
+  for (const row of [...primaryRows, ...fallbackRows]) {
+    const normalized = normalizeDichVuRecord(row);
+    const key = getDichVuKey(normalized);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(normalized);
+  }
+  return merged.sort((a, b) => Number(a.DichVuID || 0) - Number(b.DichVuID || 0));
+}
+
+async function getNextDichVuId() {
+  const [{ data, error }, fallbackRows] = await Promise.all([
+    supabase.from("DichVu").select("DichVuID").order("DichVuID", { ascending: false }).limit(1),
+    readDichVuFallbackStore(),
+  ]);
+  if (error) throw error;
+  const dbMax = Number(data?.[0]?.DichVuID || 0);
+  const fallbackMax = fallbackRows.reduce((max, row) => Math.max(max, Number(row.DichVuID || 0)), 0);
+  return Math.max(dbMax, fallbackMax) + 1;
+}
+
 app.get("/api/dichvu", async (req, res) => {
   try {
-    const { data, error } = await supabase
-      .from("DichVu")
-      .select("*")
-      .order("DichVuID", { ascending: true });
-
+    const [{ data, error }, fallbackRows] = await Promise.all([
+      supabase.from("DichVu").select("*").order("DichVuID", { ascending: true }),
+      readDichVuFallbackStore(),
+    ]);
     if (error) throw error;
-
-    res.json({
-      success: true,
-      data
-    });
+    res.json({ success: true, data: mergeDichVuRows(data || [], fallbackRows) });
   } catch (err) {
     console.error("❌ Lỗi lấy danh sách dịch vụ:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
+// DELETE /api/dichvu/clear
+app.delete("/api/dichvu/clear", async (req, res) => {
+  try {
+    const { data: rows, error: fetchErr } = await supabase.from("DichVu").select("DichVuID");
+    if (fetchErr) throw fetchErr;
+    if (rows && rows.length > 0) {
+      const ids = rows.map((r) => r.DichVuID);
+      const { error: delErr } = await supabase.from("DichVu").delete().in("DichVuID", ids);
+      if (delErr) throw delErr;
+    }
+    await writeDichVuFallbackStore([]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Loi clear DichVu:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// POST /api/dichvu
+app.post("/api/dichvu", async (req, res) => {
+  try {
+    const { LoaiDichVu, TenDichVu, MaDichVu, GhiChu, NguoiCapNhat } = req.body;
+    if (!LoaiDichVu || !TenDichVu || !MaDichVu) {
+      return res.status(400).json({ success: false, message: "Thiếu thông tin bắt buộc (LoaiDichVu, TenDichVu, MaDichVu)" });
+    }
+
+    const [{ data, error }, fallbackRows] = await Promise.all([
+      supabase.from("DichVu").select("*"),
+      readDichVuFallbackStore(),
+    ]);
+    if (error) throw error;
+
+    const incoming = normalizeDichVuRecord({
+      LoaiDichVu,
+      TenDichVu,
+      MaDichVu,
+      GhiChu,
+      NguoiCapNhat,
+    });
+
+    const allRows = mergeDichVuRows(data || [], fallbackRows);
+    const duplicate = allRows.find((row) => {
+      const sameCode = incoming.MaDichVu && row.MaDichVu && incoming.MaDichVu.toLowerCase() === row.MaDichVu.toLowerCase();
+      const sameName = incoming.LoaiDichVu.toLowerCase() === String(row.LoaiDichVu || "").trim().toLowerCase()
+        && incoming.TenDichVu.toLowerCase() === String(row.TenDichVu || "").trim().toLowerCase();
+      return sameCode || sameName;
+    });
+    if (duplicate) {
+      return res.status(409).json({ success: false, message: "Dịch vụ hoặc mã dịch vụ đã tồn tại." });
+    }
+
+    const now = new Date().toISOString();
+    const newRecord = normalizeDichVuRecord({
+      DichVuID: await getNextDichVuId(),
+      LoaiDichVu,
+      TenDichVu,
+      MaDichVu,
+      GhiChu,
+      NgayTao: now,
+      NgayCapNhat: now,
+      NguoiCapNhat: NguoiCapNhat || "System",
+    });
+
+    fallbackRows.push(newRecord);
+    await writeDichVuFallbackStore(fallbackRows);
+    res.json({ success: true, data: newRecord });
+  } catch (err) {
+    console.error("Loi them dich vu:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// PUT /api/dichvu/:id
+app.put("/api/dichvu/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { LoaiDichVu, TenDichVu, MaDichVu, GhiChu, NguoiCapNhat } = req.body;
+    const fallbackRows = await readDichVuFallbackStore();
+    const targetIndex = fallbackRows.findIndex((row) => String(row.DichVuID) === String(id));
+
+    if (targetIndex >= 0) {
+      const updated = normalizeDichVuRecord({
+        ...fallbackRows[targetIndex],
+        LoaiDichVu,
+        TenDichVu,
+        MaDichVu,
+        GhiChu,
+        NgayCapNhat: new Date().toISOString(),
+        NguoiCapNhat: NguoiCapNhat || fallbackRows[targetIndex].NguoiCapNhat || "System",
+      });
+      const duplicate = fallbackRows.find((row, index) => index !== targetIndex && (
+        (updated.MaDichVu && row.MaDichVu && updated.MaDichVu.toLowerCase() === row.MaDichVu.toLowerCase()) ||
+        (updated.LoaiDichVu.toLowerCase() === String(row.LoaiDichVu || "").trim().toLowerCase() && updated.TenDichVu.toLowerCase() === String(row.TenDichVu || "").trim().toLowerCase())
+      ));
+      if (duplicate) {
+        return res.status(409).json({ success: false, message: "Dịch vụ hoặc mã dịch vụ đã tồn tại." });
+      }
+      fallbackRows[targetIndex] = updated;
+      await writeDichVuFallbackStore(fallbackRows);
+      return res.json({ success: true, data: updated });
+    }
+
+    const { data, error } = await supabase
+      .from("DichVu")
+      .update({ LoaiDichVu: (LoaiDichVu || "").trim(), TenDichVu: (TenDichVu || "").trim(), MaDichVu: (MaDichVu || "").trim(), GhiChu: (GhiChu || "").trim() })
+      .eq("DichVuID", id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data: normalizeDichVuRecord(data) });
+  } catch (err) {
+    console.error("Loi cap nhat dich vu:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// DELETE /api/dichvu/:id
+app.delete("/api/dichvu/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const fallbackRows = await readDichVuFallbackStore();
+    const nextRows = fallbackRows.filter((row) => String(row.DichVuID) !== String(id));
+    if (nextRows.length !== fallbackRows.length) {
+      await writeDichVuFallbackStore(nextRows);
+      return res.json({ success: true });
+    }
+
+    const { error } = await supabase.from("DichVu").delete().eq("DichVuID", id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Loi xoa dich vu:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // POST /api/email
 app.post("/api/email", async (req, res) => {
   try {
