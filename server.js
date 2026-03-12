@@ -1096,6 +1096,8 @@ async function writeDichVuFallbackStore(items) {
 }
 
 function getDichVuKey(row = {}) {
+  const id = Number(row.DichVuID || 0);
+  if (id) return `id:${id}`;
   const code = String(row.MaDichVu || "").trim().toLowerCase();
   if (code) return `code:${code}`;
   const type = String(row.LoaiDichVu || "").trim().toLowerCase();
@@ -1107,7 +1109,8 @@ function getDichVuKey(row = {}) {
 function mergeDichVuRows(primaryRows = [], fallbackRows = []) {
   const seen = new Set();
   const merged = [];
-  for (const row of [...primaryRows, ...fallbackRows]) {
+  // Ưu tiên bản fallback khi trùng DichVuID để ghi đè dữ liệu từ DB thiếu cột.
+  for (const row of [...fallbackRows, ...primaryRows]) {
     const normalized = normalizeDichVuRecord(row);
     const key = getDichVuKey(normalized);
     if (seen.has(key)) continue;
@@ -1221,6 +1224,22 @@ app.put("/api/dichvu/:id", async (req, res) => {
     const { LoaiDichVu, TenDichVu, MaDichVu, GhiChu, NguoiCapNhat } = req.body;
     const fallbackRows = await readDichVuFallbackStore();
     const targetIndex = fallbackRows.findIndex((row) => String(row.DichVuID) === String(id));
+    const now = new Date().toISOString();
+
+    const duplicate = fallbackRows.find((row, index) => {
+      if (targetIndex >= 0 && index === targetIndex) return false;
+      const sameCode =
+        String(MaDichVu || "").trim() &&
+        String(row.MaDichVu || "").trim() &&
+        String(MaDichVu || "").trim().toLowerCase() === String(row.MaDichVu || "").trim().toLowerCase();
+      const sameName =
+        String(LoaiDichVu || "").trim().toLowerCase() === String(row.LoaiDichVu || "").trim().toLowerCase() &&
+        String(TenDichVu || "").trim().toLowerCase() === String(row.TenDichVu || "").trim().toLowerCase();
+      return sameCode || sameName;
+    });
+    if (duplicate) {
+      return res.status(409).json({ success: false, message: "Dịch vụ hoặc mã dịch vụ đã tồn tại." });
+    }
 
     if (targetIndex >= 0) {
       const updated = normalizeDichVuRecord({
@@ -1229,29 +1248,29 @@ app.put("/api/dichvu/:id", async (req, res) => {
         TenDichVu,
         MaDichVu,
         GhiChu,
-        NgayCapNhat: new Date().toISOString(),
+        NgayCapNhat: now,
         NguoiCapNhat: NguoiCapNhat || fallbackRows[targetIndex].NguoiCapNhat || "System",
       });
-      const duplicate = fallbackRows.find((row, index) => index !== targetIndex && (
-        (updated.MaDichVu && row.MaDichVu && updated.MaDichVu.toLowerCase() === row.MaDichVu.toLowerCase()) ||
-        (updated.LoaiDichVu.toLowerCase() === String(row.LoaiDichVu || "").trim().toLowerCase() && updated.TenDichVu.toLowerCase() === String(row.TenDichVu || "").trim().toLowerCase())
-      ));
-      if (duplicate) {
-        return res.status(409).json({ success: false, message: "Dịch vụ hoặc mã dịch vụ đã tồn tại." });
-      }
       fallbackRows[targetIndex] = updated;
       await writeDichVuFallbackStore(fallbackRows);
       return res.json({ success: true, data: updated });
     }
 
-    const { data, error } = await supabase
-      .from("DichVu")
-      .update({ LoaiDichVu: (LoaiDichVu || "").trim(), TenDichVu: (TenDichVu || "").trim(), MaDichVu: (MaDichVu || "").trim(), GhiChu: (GhiChu || "").trim() })
-      .eq("DichVuID", id)
-      .select()
-      .single();
-    if (error) throw error;
-    res.json({ success: true, data: normalizeDichVuRecord(data) });
+    // Supabase table DichVu hiện thiếu nhiều cột (TenDichVu/MaDichVu/GhiChu),
+    // nên nhánh update luôn lưu fallback để tránh lỗi schema cache.
+    const upsertRecord = normalizeDichVuRecord({
+      DichVuID: Number(id),
+      LoaiDichVu,
+      TenDichVu,
+      MaDichVu,
+      GhiChu,
+      NgayTao: now,
+      NgayCapNhat: now,
+      NguoiCapNhat: NguoiCapNhat || "System",
+    });
+    fallbackRows.push(upsertRecord);
+    await writeDichVuFallbackStore(fallbackRows);
+    res.json({ success: true, data: upsertRecord });
   } catch (err) {
     console.error("Loi cap nhat dich vu:", err);
     res.status(500).json({ success: false, message: err.message });
@@ -2557,12 +2576,39 @@ app.get("/api/b2b/services", async (req, res) => {
       TrangThai: item.TrangThai
     }));
 
+    const parseCurrencyValue = (value) => {
+      if (value === null || value === undefined || value === "") return 0;
+      if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+      return parseFloat(String(value).replace(/\./g, "")) || 0;
+    };
+
+    const { data: totalRevenueRows, error: totalRevenueError } = await supabase
+      .from("B2B_SERVICES")
+      .select("DoanhNghiepID, DoanhThuSauChietKhau");
+
+    if (totalRevenueError) throw totalRevenueError;
+
+    const companyRevenueMap = (totalRevenueRows || []).reduce((acc, row) => {
+      const companyId = row.DoanhNghiepID;
+      if (companyId === null || companyId === undefined || companyId === "") return acc;
+      const key = String(companyId);
+      acc[key] = (acc[key] || 0) + parseCurrencyValue(row.DoanhThuSauChietKhau);
+      return acc;
+    }, {});
+
+    const overallRevenue = (totalRevenueRows || []).reduce(
+      (sum, row) => sum + parseCurrencyValue(row.DoanhThuSauChietKhau),
+      0
+    );
+
     res.json({
       success: true,
       data: formattedData,
       total: count,
       page: pageNum,
       totalPages: Math.ceil(count / limitNum),
+      companyRevenueMap,
+      overallRevenue,
     });
   } catch (err) {
     console.error("Lỗi B2B_SERVICES:", err);
@@ -2782,8 +2828,20 @@ app.post("/api/b2b/services", async (req, res) => {
 
     let finalServiceCode = null;
 
+    let finalStatus = TrangThai || "Đã duyệt";
+    const isPendingStatus = (statusValue) => {
+      const normalized = String(statusValue || "")
+        .trim()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase();
 
-    let finalStatus = TrangThai;
+      return (
+        normalized.includes("cho") ||
+        normalized.includes("pending") ||
+        normalized.includes("dang ky moi")
+      );
+    };
     
 
     if (approveAction === "accountant_approve") {
@@ -2837,6 +2895,18 @@ app.post("/api/b2b/services", async (req, res) => {
                 );
             }
         }
+    }
+
+    // Với các trạng thái đã duyệt/không chờ duyệt, cấp mã ngay khi đăng ký thành công.
+    if (!finalServiceCode && !isPendingStatus(finalStatus)) {
+      finalServiceCode = await generateServiceCode(
+        supabase,
+        LoaiDichVu,
+        YeuCauHoaDon,
+        DanhMuc || "",
+        TenDichVu || "",
+        resolvedNgayThucHien
+      );
     }
 
     // Insert vào DB
