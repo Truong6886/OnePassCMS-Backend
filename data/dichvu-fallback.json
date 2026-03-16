@@ -1,1 +1,12 @@
-[]
+[
+  {
+    "DichVuID": 214,
+    "LoaiDichVu": "Thị thực",
+    "TenDichVu": "TEST",
+    "MaDichVu": "TTT",
+    "GhiChu": "",
+    "NgayTao": "2026-03-16T08:39:23.017Z",
+    "NgayCapNhat": "2026-03-16T08:39:23.017Z",
+    "NguoiCapNhat": "Lee Jung Seop"
+  }
+]
