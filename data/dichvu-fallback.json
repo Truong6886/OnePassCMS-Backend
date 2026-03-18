@@ -8,5 +8,25 @@
     "NgayTao": "2026-03-18T02:58:37.674Z",
     "NgayCapNhat": "2026-03-18T02:58:37.674Z",
     "NguoiCapNhat": "Quốc Khánh"
+  },
+  {
+    "DichVuID": 2,
+    "LoaiDichVu": "hô chiếu",
+    "TenDichVu": "TEST",
+    "MaDichVu": "HHT",
+    "GhiChu": "",
+    "NgayTao": "2026-03-18T05:32:32.474Z",
+    "NgayCapNhat": "2026-03-18T05:32:32.474Z",
+    "NguoiCapNhat": "Quốc Khánh"
+  },
+  {
+    "DichVuID": 3,
+    "LoaiDichVu": "Quốc tịch",
+    "TenDichVu": "TEST",
+    "MaDichVu": "QTT",
+    "GhiChu": "",
+    "NgayTao": "2026-03-18T05:32:54.088Z",
+    "NgayCapNhat": "2026-03-18T05:32:54.088Z",
+    "NguoiCapNhat": "Quốc Khánh"
   }
 ]
