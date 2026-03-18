@@ -28,5 +28,25 @@
     "NgayTao": "2026-03-18T05:32:54.088Z",
     "NgayCapNhat": "2026-03-18T05:32:54.088Z",
     "NguoiCapNhat": "Quốc Khánh"
+  },
+  {
+    "DichVuID": 4,
+    "LoaiDichVu": "Hộ chiếu",
+    "TenDichVu": "Hộ chiếu cấp đổi (Hợp pháp - Còn hạn)",
+    "MaDichVu": "HCCM",
+    "GhiChu": "",
+    "NgayTao": "2026-03-18T06:25:56.346Z",
+    "NgayCapNhat": "2026-03-18T06:25:56.346Z",
+    "NguoiCapNhat": "Quốc Khánh"
+  },
+  {
+    "DichVuID": 5,
+    "LoaiDichVu": "Hộ tịch",
+    "TenDichVu": "Hộ chiếu cấp mới (Hợp pháp - Trẻ em)",
+    "MaDichVu": "TCCM",
+    "GhiChu": "",
+    "NgayTao": "2026-03-18T06:29:27.025Z",
+    "NgayCapNhat": "2026-03-18T06:29:27.025Z",
+    "NguoiCapNhat": "Quốc Khánh"
   }
 ]
