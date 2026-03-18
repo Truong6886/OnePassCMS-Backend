@@ -1,15 +1,5 @@
 [
   {
-    "DichVuID": 1,
-    "LoaiDichVu": "Thị thực",
-    "TenDichVu": "TTTest",
-    "MaDichVu": "TTT",
-    "GhiChu": "",
-    "NgayTao": "2026-03-18T02:58:37.674Z",
-    "NgayCapNhat": "2026-03-18T02:58:37.674Z",
-    "NguoiCapNhat": "Quốc Khánh"
-  },
-  {
     "DichVuID": 2,
     "LoaiDichVu": "hô chiếu",
     "TenDichVu": "TEST",
@@ -31,22 +21,22 @@
   },
   {
     "DichVuID": 4,
-    "LoaiDichVu": "Hộ chiếu",
-    "TenDichVu": "Hộ chiếu cấp đổi (Hợp pháp - Còn hạn)",
-    "MaDichVu": "HCCM",
+    "LoaiDichVu": "Thị thực",
+    "TenDichVu": "TESSSTTYT",
+    "MaDichVu": "TEST",
     "GhiChu": "",
-    "NgayTao": "2026-03-18T06:25:56.346Z",
-    "NgayCapNhat": "2026-03-18T06:25:56.346Z",
+    "NgayTao": "2026-03-18T07:07:19.400Z",
+    "NgayCapNhat": "2026-03-18T07:07:19.400Z",
     "NguoiCapNhat": "Quốc Khánh"
   },
   {
     "DichVuID": 5,
-    "LoaiDichVu": "Hộ tịch",
-    "TenDichVu": "Hộ chiếu cấp mới (Hợp pháp - Trẻ em)",
-    "MaDichVu": "TCCM",
+    "LoaiDichVu": "Thị thực",
+    "TenDichVu": "RRRR",
+    "MaDichVu": "TEWRWE",
     "GhiChu": "",
-    "NgayTao": "2026-03-18T06:29:27.025Z",
-    "NgayCapNhat": "2026-03-18T06:29:27.025Z",
+    "NgayTao": "2026-03-18T07:24:41.704Z",
+    "NgayCapNhat": "2026-03-18T07:24:41.704Z",
     "NguoiCapNhat": "Quốc Khánh"
   }
 ]
