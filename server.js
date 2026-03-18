@@ -1131,6 +1131,20 @@ async function getNextDichVuId() {
   return Math.max(dbMax, fallbackMax) + 1;
 }
 
+async function upsertDichVuRowsToDatabase(rows = []) {
+  const normalizedRows = (Array.isArray(rows) ? rows : [])
+    .map(normalizeDichVuRecord)
+    .filter((row) => Number(row.DichVuID || 0) > 0);
+
+  if (normalizedRows.length === 0) return;
+
+  const { error } = await supabase
+    .from("DichVu")
+    .upsert(normalizedRows, { onConflict: "DichVuID" });
+
+  if (error) throw error;
+}
+
 app.get("/api/dichvu", async (req, res) => {
   try {
     const [{ data, error }, fallbackRows] = await Promise.all([
@@ -1138,9 +1152,33 @@ app.get("/api/dichvu", async (req, res) => {
       readDichVuFallbackStore(),
     ]);
     if (error) throw error;
-    res.json({ success: true, data: mergeDichVuRows(data || [], fallbackRows) });
+
+    // Đồng bộ dữ liệu fallback lên DB để tránh mất sau khi redeploy Render.
+    if (fallbackRows.length > 0) {
+      try {
+        await upsertDichVuRowsToDatabase(fallbackRows);
+      } catch (syncErr) {
+        console.error("⚠️ Không thể đồng bộ fallback DichVu lên Supabase:", syncErr.message || syncErr);
+      }
+    }
+
+    const mergedRows = mergeDichVuRows(data || [], fallbackRows);
+    res.json({ success: true, data: mergedRows });
   } catch (err) {
     console.error("❌ Lỗi lấy danh sách dịch vụ:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// POST /api/dichvu/sync-db
+// Đồng bộ toàn bộ dữ liệu fallback hiện có lên Supabase.
+app.post("/api/dichvu/sync-db", async (req, res) => {
+  try {
+    const fallbackRows = await readDichVuFallbackStore();
+    await upsertDichVuRowsToDatabase(fallbackRows);
+    res.json({ success: true, synced: fallbackRows.length });
+  } catch (err) {
+    console.error("Loi dong bo DichVu len DB:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -1208,8 +1246,11 @@ app.post("/api/dichvu", async (req, res) => {
       NguoiCapNhat: NguoiCapNhat || "System",
     });
 
-    fallbackRows.push(newRecord);
-    await writeDichVuFallbackStore(fallbackRows);
+    await upsertDichVuRowsToDatabase([newRecord]);
+
+    // Giữ fallback như backup cục bộ
+    const nextFallbackRows = mergeDichVuRows([newRecord], fallbackRows);
+    await writeDichVuFallbackStore(nextFallbackRows);
     res.json({ success: true, data: newRecord });
   } catch (err) {
     console.error("Loi them dich vu:", err);
@@ -1241,35 +1282,28 @@ app.put("/api/dichvu/:id", async (req, res) => {
       return res.status(409).json({ success: false, message: "Dịch vụ hoặc mã dịch vụ đã tồn tại." });
     }
 
-    if (targetIndex >= 0) {
-      const updated = normalizeDichVuRecord({
-        ...fallbackRows[targetIndex],
-        LoaiDichVu,
-        TenDichVu,
-        MaDichVu,
-        GhiChu,
-        NgayCapNhat: now,
-        NguoiCapNhat: NguoiCapNhat || fallbackRows[targetIndex].NguoiCapNhat || "System",
-      });
-      fallbackRows[targetIndex] = updated;
-      await writeDichVuFallbackStore(fallbackRows);
-      return res.json({ success: true, data: updated });
-    }
-
-    // Supabase table DichVu hiện thiếu nhiều cột (TenDichVu/MaDichVu/GhiChu),
-    // nên nhánh update luôn lưu fallback để tránh lỗi schema cache.
+    const baseRow = targetIndex >= 0 ? fallbackRows[targetIndex] : {};
     const upsertRecord = normalizeDichVuRecord({
+      ...baseRow,
       DichVuID: Number(id),
       LoaiDichVu,
       TenDichVu,
       MaDichVu,
       GhiChu,
-      NgayTao: now,
+      NgayTao: baseRow.NgayTao || now,
       NgayCapNhat: now,
-      NguoiCapNhat: NguoiCapNhat || "System",
+      NguoiCapNhat: NguoiCapNhat || baseRow.NguoiCapNhat || "System",
     });
-    fallbackRows.push(upsertRecord);
-    await writeDichVuFallbackStore(fallbackRows);
+
+    await upsertDichVuRowsToDatabase([upsertRecord]);
+
+    const nextFallbackRows = [...fallbackRows];
+    if (targetIndex >= 0) {
+      nextFallbackRows[targetIndex] = upsertRecord;
+    } else {
+      nextFallbackRows.push(upsertRecord);
+    }
+    await writeDichVuFallbackStore(nextFallbackRows);
     res.json({ success: true, data: upsertRecord });
   } catch (err) {
     console.error("Loi cap nhat dich vu:", err);
@@ -1281,15 +1315,13 @@ app.put("/api/dichvu/:id", async (req, res) => {
 app.delete("/api/dichvu/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const fallbackRows = await readDichVuFallbackStore();
-    const nextRows = fallbackRows.filter((row) => String(row.DichVuID) !== String(id));
-    if (nextRows.length !== fallbackRows.length) {
-      await writeDichVuFallbackStore(nextRows);
-      return res.json({ success: true });
-    }
-
     const { error } = await supabase.from("DichVu").delete().eq("DichVuID", id);
     if (error) throw error;
+
+    const fallbackRows = await readDichVuFallbackStore();
+    const nextRows = fallbackRows.filter((row) => String(row.DichVuID) !== String(id));
+    await writeDichVuFallbackStore(nextRows);
+
     res.json({ success: true });
   } catch (err) {
     console.error("Loi xoa dich vu:", err);
