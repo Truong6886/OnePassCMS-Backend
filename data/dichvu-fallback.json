@@ -1,12 +1,12 @@
 [
   {
-    "DichVuID": 214,
+    "DichVuID": 1,
     "LoaiDichVu": "Thị thực",
-    "TenDichVu": "TEST",
+    "TenDichVu": "TTTest",
     "MaDichVu": "TTT",
     "GhiChu": "",
-    "NgayTao": "2026-03-16T08:39:23.017Z",
-    "NgayCapNhat": "2026-03-16T08:39:23.017Z",
-    "NguoiCapNhat": "Lee Jung Seop"
+    "NgayTao": "2026-03-18T02:58:37.674Z",
+    "NgayCapNhat": "2026-03-18T02:58:37.674Z",
+    "NguoiCapNhat": "Quốc Khánh"
   }
 ]
