@@ -30,16 +30,6 @@
     "NguoiCapNhat": "Quốc Khánh"
   },
   {
-    "DichVuID": 5,
-    "LoaiDichVu": "Thị thực",
-    "TenDichVu": "RRRR",
-    "MaDichVu": "TEWRWE",
-    "GhiChu": "",
-    "NgayTao": "2026-03-18T07:24:41.704Z",
-    "NgayCapNhat": "2026-03-18T07:24:41.704Z",
-    "NguoiCapNhat": "Quốc Khánh"
-  },
-  {
     "DichVuID": 6,
     "LoaiDichVu": "hô chiếu",
     "TenDichVu": "hộ chiếu test",

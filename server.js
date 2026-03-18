@@ -1397,7 +1397,7 @@ app.get("/api/b2b/approved-services", async (req, res) => {
 app.put("/api/b2b/approved/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { TenDoanhNghiep, SoDKKD, NguoiDaiDien, NganhNgheChinh } = req.body;
+    const { TenDoanhNghiep, SoDKKD, NguoiDaiDien, NganhNgheChinh, DiaChi } = req.body;
 
     const { data, error } = await supabase
       .from("B2B_APPROVED")
@@ -1406,7 +1406,7 @@ app.put("/api/b2b/approved/:id", async (req, res) => {
         SoDKKD,
         NguoiDaiDien,
         NganhNgheChinh,
-        // Có thể thêm các trường khác nếu cần
+        DiaChi,
       })
       .eq("ID", id)
       .select()
