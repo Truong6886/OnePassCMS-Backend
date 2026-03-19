@@ -4006,34 +4006,33 @@ app.put("/api/yeucau/:id", async (req, res) => {
       currentReq.YeuCauHoaDon;
 
     const currentCode = String(updatePayload.MaHoSo ?? currentReq.MaHoSo ?? "").trim();
-    if (currentCode) {
-      const expectedPrefixFromCatalog = await resolveServiceCodePrefixFromCatalog(
+    const expectedPrefixFromCatalog = await resolveServiceCodePrefixFromCatalog(
+      supabase,
+      nextLoaiDichVu,
+      nextDanhMuc,
+      nextTenDichVu
+    );
+    const expectedPrefix = expectedPrefixFromCatalog || resolveServiceCodePrefix(nextLoaiDichVu, nextDanhMuc, nextTenDichVu);
+    const expectedDateStr = formatServiceCodeDate(nextNgayHen);
+    const expectedInvoiceCode = ["yes", "có", "true", "y"].includes(String(nextInvoiceSource).toLowerCase()) ? "Y" : "N";
+
+    const currentCodeMatch = currentCode.match(/^([^-]+)-(\d{6})-([YNyn])-([0-9]{3})$/);
+    const shouldRegenerateCode =
+      !currentCode ||
+      !currentCodeMatch ||
+      (expectedPrefix && currentCodeMatch[1].toUpperCase() !== expectedPrefix.toUpperCase()) ||
+      currentCodeMatch[2] !== expectedDateStr ||
+      currentCodeMatch[3].toUpperCase() !== expectedInvoiceCode;
+
+    if (shouldRegenerateCode) {
+      updatePayload.MaHoSo = await generateB2CServiceCode(
         supabase,
         nextLoaiDichVu,
+        nextInvoiceSource,
         nextDanhMuc,
-        nextTenDichVu
+        nextTenDichVu,
+        nextNgayHen
       );
-      const expectedPrefix = expectedPrefixFromCatalog || resolveServiceCodePrefix(nextLoaiDichVu, nextDanhMuc, nextTenDichVu);
-      const expectedDateStr = formatServiceCodeDate(nextNgayHen);
-      const expectedInvoiceCode = ["yes", "có", "true", "y"].includes(String(nextInvoiceSource).toLowerCase()) ? "Y" : "N";
-
-      const currentCodeMatch = currentCode.match(/^([^-]+)-(\d{6})-([YNyn])-([0-9]{3})$/);
-      const shouldRegenerateCode =
-        !currentCodeMatch ||
-        (expectedPrefix && currentCodeMatch[1].toUpperCase() !== expectedPrefix.toUpperCase()) ||
-        currentCodeMatch[2] !== expectedDateStr ||
-        currentCodeMatch[3].toUpperCase() !== expectedInvoiceCode;
-
-      if (shouldRegenerateCode) {
-        updatePayload.MaHoSo = await generateB2CServiceCode(
-          supabase,
-          nextLoaiDichVu,
-          nextInvoiceSource,
-          nextDanhMuc,
-          nextTenDichVu,
-          nextNgayHen
-        );
-      }
     }
 
     // 4. Perform Update
@@ -4659,6 +4658,33 @@ app.post("/api/yeucau", async (req, res) => {
       newRequestData.NguoiPhuTrachId = parseInt(currentUserId);
     }
 
+    const serviceNameForCode =
+      String(getPrimaryServiceNameFromDetails(newRequestData.ChiTietDichVu) || "").trim() ||
+      String(newRequestData.TenDichVu || "").trim();
+
+    const dateForCode = resolveSubmissionDateForCode(
+      newRequestData.NgayHen,
+      getAppointmentDateFromDetails(newRequestData.ChiTietDichVu),
+      newRequestData.ChonNgay,
+      newRequestData.NgayBatDau,
+      newRequestData.NgayNopHoSo,
+      newRequestData.NgayTao
+    );
+
+    const invoiceSourceForCode =
+      newRequestData.Invoice ??
+      newRequestData.YeuCauXuatHoaDon ??
+      newRequestData.YeuCauHoaDon;
+
+    newRequestData.MaHoSo = await generateB2CServiceCode(
+      supabase,
+      newRequestData.LoaiDichVu,
+      invoiceSourceForCode,
+      newRequestData.DanhMuc,
+      serviceNameForCode,
+      dateForCode
+    );
+
     // 4. Insert vào DB
     const { data, error } = await supabase
       .from("YeuCau")
@@ -4668,12 +4694,12 @@ app.post("/api/yeucau", async (req, res) => {
 
     if (error) throw error;
 
-    console.log("✅ [CMS] Yêu cầu tạo thành công:", data.MaHoSo ? `Mã: ${data.MaHoSo}` : "Chưa cấp mã");
+    console.log("✅ [CMS] Yêu cầu tạo thành công:", `Mã: ${data.MaHoSo}`);
 
     res.json({
       success: true,
       data: data,
-      message: "Đăng ký dịch vụ mới thành công, hồ sơ đang chờ duyệt",
+      message: "Đăng ký dịch vụ mới thành công",
     });
 
   } catch (err) {
