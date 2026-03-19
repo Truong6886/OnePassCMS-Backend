@@ -128,6 +128,11 @@ function normalizeServiceKey(value) {
     .toLowerCase();
 }
 
+function isPlaceholderServiceName(value) {
+  const normalized = normalizeServiceKey(value);
+  return normalized === "them" || normalized === "add" || normalized === "custom";
+}
+
 const SERVICE_CODE_BY_NAME = Object.values(SERVICE_MAPPING).reduce((acc, serviceGroup) => {
   Object.entries(serviceGroup).forEach(([serviceName, code]) => {
     acc[normalizeServiceKey(serviceName)] = code;
@@ -158,6 +163,73 @@ function resolveServiceCodePrefix(loaiDichVu, danhMuc, tenDichVu = "") {
   }
 
   return "";
+}
+
+async function resolveServiceCodePrefixFromCatalog(supabaseClient, loaiDichVu, danhMuc, tenDichVu = "") {
+  if (!supabaseClient) return "";
+
+  try {
+    const [{ data: dbRows, error }, fallbackRows] = await Promise.all([
+      supabaseClient.from("DichVu").select("LoaiDichVu, TenDichVu, MaDichVu"),
+      readDichVuFallbackStore(),
+    ]);
+
+    if (error) throw error;
+
+    const mergedRows = mergeDichVuRows(dbRows || [], fallbackRows || []);
+    if (!mergedRows || mergedRows.length === 0) return "";
+
+    const normalizedLoai = normalizeServiceKey(loaiDichVu || "");
+    const rawDanhMuc = String(danhMuc || "").trim();
+    const rawTenDichVu = String(tenDichVu || "").trim();
+
+    const splitCandidates = (text) =>
+      String(text || "")
+        .split("+")
+        .map((part) => String(part || "").trim())
+        .filter(Boolean);
+
+    const mainCategory = rawDanhMuc ? rawDanhMuc.split("+")[0].trim() : "";
+    const tenCandidates = splitCandidates(rawTenDichVu).filter((name) => !isPlaceholderServiceName(name));
+    const danhMucCandidates = splitCandidates(rawDanhMuc).filter((name) => !isPlaceholderServiceName(name));
+
+    const candidates = [
+      ...danhMucCandidates,
+      mainCategory,
+      ...tenCandidates,
+      isPlaceholderServiceName(rawTenDichVu) ? "" : rawTenDichVu,
+    ].filter(Boolean);
+
+    const findByName = (candidateName, strictLoai = true) => {
+      const normalizedCandidate = normalizeServiceKey(candidateName);
+      if (!normalizedCandidate) return null;
+
+      return mergedRows.find((row) => {
+        const rowCode = String(row?.MaDichVu || "").trim();
+        if (!rowCode) return false;
+
+        const rowName = normalizeServiceKey(row?.TenDichVu || "");
+        if (!rowName || rowName !== normalizedCandidate) return false;
+
+        if (!strictLoai || !normalizedLoai) return true;
+        const rowLoai = normalizeServiceKey(row?.LoaiDichVu || "");
+        return rowLoai === normalizedLoai;
+      });
+    };
+
+    for (const candidate of candidates) {
+      const strictMatch = findByName(candidate, true);
+      if (strictMatch?.MaDichVu) return String(strictMatch.MaDichVu).trim();
+
+      const looseMatch = findByName(candidate, false);
+      if (looseMatch?.MaDichVu) return String(looseMatch.MaDichVu).trim();
+    }
+
+    return "";
+  } catch (err) {
+    console.error("⚠️ Không thể resolve prefix từ danh mục DichVu:", err.message || err);
+    return "";
+  }
 }
 
 function replacePrefixKeepingSuffix(currentCode, newPrefix) {
@@ -240,11 +312,50 @@ function resolveSubmissionDateForCode(...candidates) {
   return null;
 }
 
+function parseServiceDetails(details) {
+  if (!details) return null;
+  if (typeof details === "string") {
+    try {
+      return JSON.parse(details);
+    } catch (_) {
+      return null;
+    }
+  }
+  if (typeof details === "object") return details;
+  return null;
+}
+
+function getAppointmentDateFromDetails(details) {
+  const parsed = parseServiceDetails(details);
+  return String(parsed?.meta?.NgayHen || "").trim();
+}
+
+function mergeDetailsWithAppointmentDate(details, ngayHen) {
+  const parsed = parseServiceDetails(details) || {};
+  const safeNgayHen = String(ngayHen || "").trim();
+
+  if (!safeNgayHen) {
+    return Object.keys(parsed).length > 0 ? parsed : null;
+  }
+
+  const meta = { ...(parsed.meta || {}), NgayHen: safeNgayHen };
+  return { ...parsed, meta };
+}
+
 
 
 
 async function generateServiceCode(supabase, loaiDichVu, yeuCauHoaDon, danhMuc, tenDichVu = "", submissionDate = null) {
-  let prefix = resolveServiceCodePrefix(loaiDichVu, danhMuc, tenDichVu);
+  let prefix = await resolveServiceCodePrefixFromCatalog(
+    supabase,
+    loaiDichVu,
+    danhMuc,
+    tenDichVu
+  );
+
+  if (!prefix) {
+    prefix = resolveServiceCodePrefix(loaiDichVu, danhMuc, tenDichVu);
+  }
 
   if (!prefix) {
      const cleanLoai = loaiDichVu ? loaiDichVu.trim() : "";
@@ -280,7 +391,16 @@ async function generateServiceCode(supabase, loaiDichVu, yeuCauHoaDon, danhMuc, 
 
 
 async function generateB2CServiceCode(supabase, loaiDichVu, yeuCauHoaDon, danhMuc, tenDichVu = "", submissionDate = null) {
-  let prefix = resolveServiceCodePrefix(loaiDichVu, danhMuc, tenDichVu);
+  let prefix = await resolveServiceCodePrefixFromCatalog(
+    supabase,
+    loaiDichVu,
+    danhMuc,
+    tenDichVu
+  );
+
+  if (!prefix) {
+    prefix = resolveServiceCodePrefix(loaiDichVu, danhMuc, tenDichVu);
+  }
 
   if (!prefix) {
      const cleanLoai = loaiDichVu ? loaiDichVu.trim() : "";
@@ -686,7 +806,7 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
     const { 
       userId, NguoiPhuTrachId, HoTen, SoDienThoai, Email, MaVung,
       LoaiDichVu, TenDichVu, GoiDichVu, TenHinhThuc, CoSoTuVan,
-      ChonNgay, Gio, NoiDung, GhiChu, DanhMuc, ChiTietDichVu,NgayBatDau, 
+      ChonNgay, Gio, NoiDung, GhiChu, DanhMuc, ChiTietDichVu, NgayHen, NgayBatDau,
       NgayKetThuc
     } = req.body; 
 
@@ -697,6 +817,7 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
     };
 
     const safeChonNgay = normalizeNullable(ChonNgay);
+    const safeNgayHen = normalizeNullable(NgayHen);
     const safeGio = normalizeNullable(Gio);
     const safeNgayBatDau = normalizeNullable(NgayBatDau);
     const safeNgayKetThuc = normalizeNullable(NgayKetThuc);
@@ -745,9 +866,16 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
 
     const { data: currentReq } = await supabase.from("YeuCau").select("*").eq("YeuCauID", id).single();
     let newServiceCode = currentReq.MaHoSo;
+    const primaryFromDetailsForCode = getPrimaryServiceNameFromDetails(details || currentReq.ChiTietDichVu);
     const serviceNameForCode =
-      String(TenDichVu || currentReq.TenDichVu || "").trim() || getPrimaryServiceNameFromDetails(details || currentReq.ChiTietDichVu);
+      String(primaryFromDetailsForCode || "").trim() ||
+      String(TenDichVu || currentReq.TenDichVu || "").trim();
+    const nextNgayHenFromDetails = getAppointmentDateFromDetails(details || currentReq.ChiTietDichVu);
     const submissionDateForCode = resolveSubmissionDateForCode(
+      safeNgayHen,
+      nextNgayHenFromDetails,
+      currentReq.NgayHen,
+      getAppointmentDateFromDetails(currentReq.ChiTietDichVu),
       safeNgayBatDau,
       safeChonNgay,
       req.body.NgayNopHoSo,
@@ -764,7 +892,13 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
       currentReq.YeuCauXuatHoaDon ??
       currentReq.YeuCauHoaDon;
 
-    const expectedPrefix = resolveServiceCodePrefix(
+    const expectedPrefixFromCatalog = await resolveServiceCodePrefixFromCatalog(
+      supabase,
+      LoaiDichVu || currentReq.LoaiDichVu,
+      DanhMuc || currentReq.DanhMuc,
+      serviceNameForCode
+    );
+    const expectedPrefix = expectedPrefixFromCatalog || resolveServiceCodePrefix(
       LoaiDichVu || currentReq.LoaiDichVu,
       DanhMuc || currentReq.DanhMuc,
       serviceNameForCode
@@ -800,6 +934,7 @@ app.put("/api/yeucau/approve/:id", async (req, res) => {
       .update({
         HoTen, SoDienThoai, Email, MaVung, LoaiDichVu, TenDichVu, GoiDichVu,
         TenHinhThuc, CoSoTuVan, ChonNgay: safeChonNgay, Gio: safeGio, NoiDung, GhiChu, DanhMuc,
+        NgayHen: safeNgayHen,
         MaHoSo: newServiceCode,
         NguoiPhuTrachId: NguoiPhuTrachId || userId,
         ChiTietDichVu: details,
@@ -2526,7 +2661,13 @@ app.get("/api/b2b/services", async (req, res) => {
       if (isPendingServiceStatus(item.TrangThai)) continue;
 
       const currentCode = String(item.ServiceID || "").trim();
-      const resolvedPrefix = resolveServiceCodePrefix(
+      const resolvedPrefixFromCatalog = await resolveServiceCodePrefixFromCatalog(
+        supabase,
+        item.LoaiDichVu,
+        item.DanhMuc,
+        item.TenDichVu
+      );
+      const resolvedPrefix = resolvedPrefixFromCatalog || resolveServiceCodePrefix(
         item.LoaiDichVu,
         item.DanhMuc,
         item.TenDichVu
@@ -2537,6 +2678,8 @@ app.get("/api/b2b/services", async (req, res) => {
       if (!effectivePrefix) continue;
 
       const submissionDateForCode = resolveSubmissionDateForCode(
+        getAppointmentDateFromDetails(item.ChiTietDichVu),
+        item.NgayHen,
         item.NgayThucHien,
         item.NgayBatDau,
         item.ChonNgay,
@@ -2580,7 +2723,9 @@ app.get("/api/b2b/services", async (req, res) => {
       if (!fixErr) item.ServiceID = fixedCode;
     }
 
-    const formattedData = data.map(item => ({
+    const formattedData = data.map(item => {
+      const ngayHen = getAppointmentDateFromDetails(item.ChiTietDichVu);
+      return ({
       ID: item.STT,
       DoanhNghiepID: item.DoanhNghiepID,
       SoDKKD: item.DoanhNghiep?.SoDKKD || "", 
@@ -2593,6 +2738,7 @@ app.get("/api/b2b/services", async (req, res) => {
       GoiDichVu: item.GoiDichVu || "", 
       YeuCauHoaDon: item.YeuCauHoaDon || "",     
       InvoiceUrl: item.InvoiceUrl || "",           
+      NgayHen: ngayHen,
       NgayThucHien: item.NgayThucHien,
       NgayHoanThanh: item.NgayHoanThanh,
       DoanhThuTruocChietKhau: item.DoanhThuTruocChietKhau,
@@ -2606,7 +2752,8 @@ app.get("/api/b2b/services", async (req, res) => {
       NguoiPhuTrach: item.NguoiPhuTrach || null, 
       NguoiPhuTrachName: item.NguoiPhuTrach ? item.NguoiPhuTrach.name : "",
       TrangThai: item.TrangThai
-    }));
+    });
+    });
 
     const parseCurrencyValue = (value) => {
       if (value === null || value === undefined || value === "") return 0;
@@ -2737,7 +2884,13 @@ app.post("/api/b2b/services/backfill-codes", async (req, res) => {
         continue;
       }
 
-      const resolvedPrefix = resolveServiceCodePrefix(loaiDichVu, danhMuc, tenDichVu);
+      const resolvedPrefixFromCatalog = await resolveServiceCodePrefixFromCatalog(
+        supabase,
+        loaiDichVu,
+        danhMuc,
+        tenDichVu
+      );
+      const resolvedPrefix = resolvedPrefixFromCatalog || resolveServiceCodePrefix(loaiDichVu, danhMuc, tenDichVu);
       if (!resolvedPrefix) {
         skipped += 1;
         if (sample.length < 30) {
@@ -2833,7 +2986,7 @@ app.post("/api/b2b/services", async (req, res) => {
   try {
     const { 
       DoanhNghiepID, LoaiDichVu, DanhMuc, TenDichVu, NgayThucHien,
-      NgayHoanThanh, YeuCauHoaDon, InvoiceUrl, 
+      NgayKetThuc, NgayHen, NgayHoanThanh, YeuCauHoaDon, InvoiceUrl, 
       GhiChu, NguoiPhuTrachId, GoiDichVu,
       DoanhThuTruocChietKhau, Vi, MucChietKhau,
       approveAction, userId, ChiTietDichVu, 
@@ -2850,6 +3003,19 @@ app.post("/api/b2b/services", async (req, res) => {
       req.body.ChonNgay,
       req.body.NgayNopHoSo,
       new Date().toISOString()
+    );
+
+    const appointmentDateForCode = resolveSubmissionDateForCode(
+      NgayHen,
+      NgayKetThuc,
+      getAppointmentDateFromDetails(ChiTietDichVu),
+      resolvedNgayThucHien,
+      new Date().toISOString()
+    );
+
+    const detailsWithNgayHen = mergeDetailsWithAppointmentDate(
+      ChiTietDichVu,
+      appointmentDateForCode
     );
 
     const dtTruoc = DoanhThuTruocChietKhau ? parseInt(DoanhThuTruocChietKhau) : 0;
@@ -2923,7 +3089,7 @@ app.post("/api/b2b/services", async (req, res) => {
                     YeuCauHoaDon,
                   DanhMuc || "",
                   TenDichVu || "",
-                  resolvedNgayThucHien
+                  appointmentDateForCode
                 );
             }
         }
@@ -2937,7 +3103,7 @@ app.post("/api/b2b/services", async (req, res) => {
         YeuCauHoaDon,
         DanhMuc || "",
         TenDichVu || "",
-        resolvedNgayThucHien
+        appointmentDateForCode
       );
     }
 
@@ -2963,7 +3129,7 @@ app.post("/api/b2b/services", async (req, res) => {
         SoTienChietKhau: tienCK,
         DoanhThuSauChietKhau: dtSau, 
         Vi: viTien,
-        ChiTietDichVu: ChiTietDichVu || null,
+        ChiTietDichVu: detailsWithNgayHen,
         
         TrangThai: finalStatus,
         CreatedAt: new Date().toISOString()
@@ -2991,6 +3157,8 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
         TenDichVu,
         DiaChiNhan,
         NgayThucHien, 
+        NgayKetThuc,
+        NgayHen,
         NgayHoanThanh,
         DoanhThuTruocChietKhau, 
         Vi, 
@@ -3023,9 +3191,32 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
       current.NgayBatDau,
       current.CreatedAt
     );
-    
+
+    const currentNgayHen = getAppointmentDateFromDetails(current.ChiTietDichVu);
+    const nextNgayHen = resolveSubmissionDateForCode(
+      NgayHen,
+      NgayKetThuc,
+      getAppointmentDateFromDetails(ChiTietDichVu),
+      currentNgayHen,
+      resolvedNgayThucHien,
+      current.CreatedAt
+    );
+
     let finalMaDichVu = current.ServiceID;
     let finalTrangThai = TrangThai || current.TrangThai;
+    const isPendingStatus = (statusValue) => {
+      const normalized = String(statusValue || "")
+        .trim()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase();
+
+      return (
+        normalized.includes("cho") ||
+        normalized.includes("pending") ||
+        normalized.includes("dang ky moi")
+      );
+    };
 
     if (approveAction === "accountant_approve") {
       finalTrangThai = "Đã duyệt";
@@ -3136,7 +3327,7 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
         YeuCauHoaDon || current.YeuCauHoaDon,
         DanhMuc || current.DanhMuc,
         TenDichVu || current.TenDichVu,
-        resolvedNgayThucHien
+        nextNgayHen
       );
 
      
@@ -3164,6 +3355,49 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
       });
     }
 
+    if (!isPendingStatus(finalTrangThai)) {
+      const targetDateForCode = resolveSubmissionDateForCode(
+        nextNgayHen,
+        resolvedNgayThucHien,
+        current.NgayThucHien,
+        current.CreatedAt
+      );
+      const expectedDateStr = formatServiceCodeDate(targetDateForCode);
+      const expectedInvoiceCode = ["yes", "có", "true", "y"].includes(
+        String(YeuCauHoaDon || current.YeuCauHoaDon).toLowerCase()
+      )
+        ? "Y"
+        : "N";
+      const resolvedPrefixFromCatalog = await resolveServiceCodePrefixFromCatalog(
+        supabase,
+        LoaiDichVu || current.LoaiDichVu,
+        DanhMuc || current.DanhMuc,
+        TenDichVu || current.TenDichVu
+      );
+      const resolvedPrefix = resolvedPrefixFromCatalog || resolveServiceCodePrefix(
+        LoaiDichVu || current.LoaiDichVu,
+        DanhMuc || current.DanhMuc,
+        TenDichVu || current.TenDichVu
+      );
+
+      const currentCode = String(finalMaDichVu || "").trim();
+      const currentCodeMatch = currentCode.match(/^([^-]+)-(\d{6})-([YNyn])-([0-9]{3})$/);
+      const effectivePrefix = resolvedPrefix || (currentCodeMatch ? currentCodeMatch[1] : "");
+
+      if (effectivePrefix && currentCodeMatch) {
+        finalMaDichVu = `${effectivePrefix}-${expectedDateStr}-${expectedInvoiceCode}-${currentCodeMatch[4]}`;
+      } else {
+        finalMaDichVu = await generateServiceCode(
+          supabase,
+          LoaiDichVu || current.LoaiDichVu,
+          YeuCauHoaDon || current.YeuCauHoaDon,
+          DanhMuc || current.DanhMuc,
+          TenDichVu || current.TenDichVu,
+          targetDateForCode
+        );
+      }
+    }
+
   
     const updateData = {
       LoaiDichVu: LoaiDichVu || current.LoaiDichVu,
@@ -3189,8 +3423,10 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
       GhiChu: GhiChu || current.GhiChu,
       NguoiPhuTrachId: NguoiPhuTrachId || current.NguoiPhuTrachId,
       
-    
-      ChiTietDichVu: ChiTietDichVu || current.ChiTietDichVu,
+      ChiTietDichVu: mergeDetailsWithAppointmentDate(
+        ChiTietDichVu || current.ChiTietDichVu,
+        nextNgayHen
+      ),
       
       UpdatedAt: new Date().toISOString()
     };
@@ -3746,14 +3982,18 @@ app.put("/api/yeucau/:id", async (req, res) => {
     const nextDanhMuc = updatePayload.DanhMuc ?? currentReq.DanhMuc;
     const detailsForName = updatePayload.ChiTietDichVu ?? currentReq.ChiTietDichVu;
     const nextTenDichVu =
-      String(updatePayload.TenDichVu ?? currentReq.TenDichVu ?? "").trim() ||
-      getPrimaryServiceNameFromDetails(detailsForName);
-    const nextNgayBatDau = resolveSubmissionDateForCode(
-      updatePayload.NgayBatDau,
+      String(getPrimaryServiceNameFromDetails(detailsForName) || "").trim() ||
+      String(updatePayload.TenDichVu ?? currentReq.TenDichVu ?? "").trim();
+    const nextNgayHen = resolveSubmissionDateForCode(
+      updatePayload.NgayHen,
+      getAppointmentDateFromDetails(detailsForName),
+      currentReq.NgayHen,
+      getAppointmentDateFromDetails(currentReq.ChiTietDichVu),
       updatePayload.ChonNgay,
+      currentReq.ChonNgay,
+      updatePayload.NgayBatDau,
       updatePayload.NgayNopHoSo,
       currentReq.NgayBatDau,
-      currentReq.ChonNgay,
       currentReq.NgayNopHoSo,
       currentReq.CreatedAt
     );
@@ -3767,8 +4007,14 @@ app.put("/api/yeucau/:id", async (req, res) => {
 
     const currentCode = String(updatePayload.MaHoSo ?? currentReq.MaHoSo ?? "").trim();
     if (currentCode) {
-      const expectedPrefix = resolveServiceCodePrefix(nextLoaiDichVu, nextDanhMuc, nextTenDichVu);
-      const expectedDateStr = formatServiceCodeDate(nextNgayBatDau);
+      const expectedPrefixFromCatalog = await resolveServiceCodePrefixFromCatalog(
+        supabase,
+        nextLoaiDichVu,
+        nextDanhMuc,
+        nextTenDichVu
+      );
+      const expectedPrefix = expectedPrefixFromCatalog || resolveServiceCodePrefix(nextLoaiDichVu, nextDanhMuc, nextTenDichVu);
+      const expectedDateStr = formatServiceCodeDate(nextNgayHen);
       const expectedInvoiceCode = ["yes", "có", "true", "y"].includes(String(nextInvoiceSource).toLowerCase()) ? "Y" : "N";
 
       const currentCodeMatch = currentCode.match(/^([^-]+)-(\d{6})-([YNyn])-([0-9]{3})$/);
@@ -3785,7 +4031,7 @@ app.put("/api/yeucau/:id", async (req, res) => {
           nextInvoiceSource,
           nextDanhMuc,
           nextTenDichVu,
-          nextNgayBatDau
+          nextNgayHen
         );
       }
     }
@@ -3978,8 +4224,19 @@ app.get("/api/yeucau", async (req, res) => {
       .range(from, to);
 
    
-    if (!canViewAll && userId) {
-      query = query.eq("NguoiPhuTrachId", parseInt(userId, 10));
+    const requesterId = Number.parseInt(userId, 10);
+    const hasUserIdFilter =
+      userId !== undefined &&
+      userId !== null &&
+      String(userId).trim() !== "";
+
+    if (!canViewAll && hasUserIdFilter) {
+      if (Number.isFinite(requesterId) && requesterId > 0) {
+        query = query.eq("NguoiPhuTrachId", requesterId);
+      } else {
+        console.warn("⚠️ Invalid userId filter on /api/yeucau:", userId);
+        query = query.eq("NguoiPhuTrachId", -1);
+      }
     }
 
     const { data, count, error } = await query;
@@ -3990,9 +4247,16 @@ app.get("/api/yeucau", async (req, res) => {
       if (!currentCode) continue;
 
       const serviceNameForMapping =
-        String(item.TenDichVu || "").trim() || getPrimaryServiceNameFromDetails(item.ChiTietDichVu);
+        String(getPrimaryServiceNameFromDetails(item.ChiTietDichVu) || "").trim() ||
+        String(item.TenDichVu || "").trim();
 
-      const resolvedPrefix = resolveServiceCodePrefix(
+      const resolvedPrefixFromCatalog = await resolveServiceCodePrefixFromCatalog(
+        supabase,
+        item.LoaiDichVu,
+        item.DanhMuc,
+        serviceNameForMapping
+      );
+      const resolvedPrefix = resolvedPrefixFromCatalog || resolveServiceCodePrefix(
         item.LoaiDichVu,
         item.DanhMuc,
         serviceNameForMapping
@@ -4002,6 +4266,8 @@ app.get("/api/yeucau", async (req, res) => {
       if (!effectivePrefix) continue;
 
       const submissionDateForCode = resolveSubmissionDateForCode(
+        item.NgayHen,
+        getAppointmentDateFromDetails(item.ChiTietDichVu),
         item.NgayBatDau,
         item.ChonNgay,
         item.NgayNopHoSo,
@@ -4031,7 +4297,14 @@ app.get("/api/yeucau", async (req, res) => {
           item.Invoice || item.YeuCauXuatHoaDon || item.YeuCauHoaDon,
           item.DanhMuc,
           serviceNameForMapping,
-          resolveSubmissionDateForCode(item.NgayBatDau, item.ChonNgay, item.NgayNopHoSo, item.CreatedAt)
+          resolveSubmissionDateForCode(
+            item.NgayHen,
+            getAppointmentDateFromDetails(item.ChiTietDichVu),
+            item.NgayBatDau,
+            item.ChonNgay,
+            item.NgayNopHoSo,
+            item.CreatedAt
+          )
         );
       }
 
@@ -4052,8 +4325,12 @@ app.get("/api/yeucau", async (req, res) => {
     let revenueQuery = supabase.from("YeuCau").select("DoanhThuSauChietKhau");
 
     // Áp dụng CÙNG bộ lọc quyền hạn như trên
-    if (!canViewAll && userId) {
-      revenueQuery = revenueQuery.eq("NguoiPhuTrachId", parseInt(userId, 10));
+    if (!canViewAll && hasUserIdFilter) {
+      if (Number.isFinite(requesterId) && requesterId > 0) {
+        revenueQuery = revenueQuery.eq("NguoiPhuTrachId", requesterId);
+      } else {
+        revenueQuery = revenueQuery.eq("NguoiPhuTrachId", -1);
+      }
     }
 
     const { data: revenueData, error: revenueError } = await revenueQuery;
