@@ -1532,20 +1532,60 @@ app.get("/api/b2b/approved-services", async (req, res) => {
 app.put("/api/b2b/approved/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { TenDoanhNghiep, SoDKKD, NguoiDaiDien, NganhNgheChinh, DiaChi } = req.body;
+    const {
+      TenDoanhNghiep,
+      SoDKKD,
+      NguoiDaiDien,
+      NganhNgheChinh,
+      DiaChi,
+      SoDienThoai,
+      Email,
+      MaVung,
+    } = req.body;
 
-    const { data, error } = await supabase
+    const cleanPhone = String(SoDienThoai || "").trim();
+    const cleanEmail = String(Email || "").trim();
+    const cleanMaVung = String(MaVung || "").trim();
+    const parsedPhonePrefix = cleanPhone.match(/^(\+\d{1,4})\s*(.*)$/);
+
+    const finalMaVung = cleanMaVung || (parsedPhonePrefix ? parsedPhonePrefix[1] : null);
+    const finalPhone = parsedPhonePrefix ? String(parsedPhonePrefix[2] || "").trim() : cleanPhone;
+
+    const basePayload = {
+      TenDoanhNghiep,
+      SoDKKD,
+      NguoiDaiDien,
+      NganhNgheChinh,
+      DiaChi,
+      SoDienThoai: finalPhone,
+      Email: cleanEmail,
+    };
+
+    const payloadWithMaVung = {
+      ...basePayload,
+      MaVung: finalMaVung,
+    };
+
+    let { data, error } = await supabase
       .from("B2B_APPROVED")
-      .update({
-        TenDoanhNghiep,
-        SoDKKD,
-        NguoiDaiDien,
-        NganhNgheChinh,
-        DiaChi,
-      })
+      .update(payloadWithMaVung)
       .eq("ID", id)
       .select()
       .single();
+
+    if (error && /MaVung/i.test(String(error.message || ""))) {
+      // Fallback for deployments where B2B_APPROVED has no MaVung column yet.
+      const fullPhone = cleanPhone;
+      ({ data, error } = await supabase
+        .from("B2B_APPROVED")
+        .update({
+          ...basePayload,
+          SoDienThoai: fullPhone,
+        })
+        .eq("ID", id)
+        .select()
+        .single());
+    }
 
     if (error) throw error;
 
@@ -3552,7 +3592,7 @@ app.get("/api/b2b/approved-with-services", async (req, res) => {
 
 app.get("/api/b2b/approved", async (req, res) => {
   try {
-    const { SoDKKD, page, limit } = req.query;
+    const { SoDKKD, page, limit, all } = req.query;
     
     
     if (SoDKKD) {
@@ -3562,6 +3602,30 @@ app.get("/api/b2b/approved", async (req, res) => {
         .eq("SoDKKD", String(SoDKKD).trim());
        if (error) throw error;
        return res.json({ success: true, data });
+    }
+
+    const isAll = String(all || "").toLowerCase() === "true";
+    if (isAll) {
+      const { data: allApproved, error: allError } = await supabase
+        .from("B2B_APPROVED")
+        .select("*")
+        .order("ID", { ascending: false });
+
+      if (allError) throw allError;
+
+      const mappedAll = (allApproved || []).map((item) => ({
+        ...item,
+        DichVu: item.DichVu || "",
+        DichVuKhac: item.DichVuKhac || "",
+      }));
+
+      return res.json({
+        success: true,
+        data: mappedAll,
+        total: mappedAll.length,
+        page: 1,
+        totalPages: 1,
+      });
     }
 
 
@@ -3584,12 +3648,20 @@ app.get("/api/b2b/approved", async (req, res) => {
       DichVuKhac: item.DichVuKhac || "",
     }));
 
+    let totalCount = Number.isFinite(count) ? count : null;
+    if (totalCount === null) {
+      const { count: fallbackCount } = await supabase
+        .from("B2B_APPROVED")
+        .select("ID", { count: "exact", head: true });
+      totalCount = Number.isFinite(fallbackCount) ? fallbackCount : mappedList.length;
+    }
+
     res.json({ 
       success: true, 
       data: mappedList,
-      total: count,
+      total: totalCount,
       page: pageNum,
-      totalPages: Math.ceil(count / limitNum)
+      totalPages: Math.ceil(totalCount / limitNum)
     });
   } catch (err) {
     console.error("Error fetching B2B_APPROVED:", err);
