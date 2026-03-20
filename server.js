@@ -4266,7 +4266,13 @@ app.get("/api/yeucau", async (req, res) => {
       is_director,    
       is_accountant,  
       page = 1, 
-      limit = 20 
+      limit = 20,
+      search = "",
+      status = "",
+      branch = "",
+      serviceType = "",
+      fromDate = "",
+      toDate = "",
     } = req.query;
 
     console.log("📥 Fetching YeuCau | userId:", userId, "Roles:", { is_admin, is_staff });
@@ -4285,14 +4291,45 @@ app.get("/api/yeucau", async (req, res) => {
     const to = from + pageLimit - 1;
 
 
-    let query = supabase
+    const applyListFilters = (baseQuery) => {
+      let nextQuery = baseQuery;
+      const searchText = String(search || "").trim();
+      const statusText = String(status || "").trim();
+      const branchText = String(branch || "").trim();
+      const serviceTypeText = String(serviceType || "").trim();
+      const fromDateText = String(fromDate || "").trim();
+      const toDateText = String(toDate || "").trim();
+
+      if (searchText) {
+        nextQuery = nextQuery.or(
+          [
+            `HoTen.ilike.%${searchText}%`,
+            `Email.ilike.%${searchText}%`,
+            `SoDienThoai.ilike.%${searchText}%`,
+            `MaHoSo.ilike.%${searchText}%`,
+            `TenDichVu.ilike.%${searchText}%`,
+            `LoaiDichVu.ilike.%${searchText}%`,
+          ].join(",")
+        );
+      }
+
+      if (statusText) nextQuery = nextQuery.eq("TrangThai", statusText);
+      if (branchText) nextQuery = nextQuery.eq("CoSoTuVan", branchText);
+      if (serviceTypeText) nextQuery = nextQuery.eq("LoaiDichVu", serviceTypeText);
+      if (fromDateText) nextQuery = nextQuery.gte("NgayBatDau", fromDateText);
+      if (toDateText) nextQuery = nextQuery.lte("NgayBatDau", toDateText);
+
+      return nextQuery;
+    };
+
+    let query = applyListFilters(supabase
       .from("YeuCau")
       .select(
         `*, ChiTietDichVu, NguoiPhuTrach:User!YeuCau_NguoiPhuTrachId_fkey(id, name, username, email)`,
         { count: "exact" }
       )
       .order("YeuCauID", { ascending: false }) 
-      .range(from, to);
+      .range(from, to));
 
    
     const requesterId = Number.parseInt(userId, 10);
@@ -4393,7 +4430,7 @@ app.get("/api/yeucau", async (req, res) => {
     }
 
  
-    let revenueQuery = supabase.from("YeuCau").select("DoanhThuSauChietKhau");
+    let revenueQuery = applyListFilters(supabase.from("YeuCau").select("DoanhThuSauChietKhau"));
 
     // Áp dụng CÙNG bộ lọc quyền hạn như trên
     if (!canViewAll && hasUserIdFilter) {
