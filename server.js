@@ -2123,7 +2123,7 @@ app.post("/api/User", async (req, res) => {
     const { 
       username, password, email, name, 
       is_admin, is_director, is_accountant, is_staff,
-      perm_approve_b2b, perm_approve_b2c, perm_view_revenue, perm_view_staff,
+      perm_approve_b2b, perm_approve_b2c, perm_view_revenue, perm_view_staff, perm_manage_news,
       ChucDanh, PhongBan, MaVung, SoDienThoai, NgayVaoLam, LoaiHopDong, CV
     } = req.body;
     
@@ -2187,6 +2187,7 @@ app.post("/api/User", async (req, res) => {
         perm_approve_b2c: perm_approve_b2c || false,
         perm_view_revenue: perm_view_revenue || false,
         perm_view_staff: perm_view_staff || false,
+        perm_manage_news: perm_manage_news || false,
 
         ChucDanh, PhongBan, MaVung, SoDienThoai, NgayVaoLam, LoaiHopDong, CV
       }])
@@ -2230,7 +2231,7 @@ app.put("/api/User/:id", uploadImages.single("avatar"), async (req, res) => {
     let { 
       name, username, email, password, 
       is_admin, is_director, is_accountant, is_staff,
-      perm_approve_b2b, perm_approve_b2c, perm_view_revenue, perm_view_staff,
+      perm_approve_b2b, perm_approve_b2c, perm_view_revenue, perm_view_staff, perm_manage_news,
       ChucDanh, PhongBan, MaVung, SoDienThoai, NgayVaoLam, LoaiHopDong, CV
     } = req.body;
 
@@ -2244,7 +2245,7 @@ app.put("/api/User/:id", uploadImages.single("avatar"), async (req, res) => {
       email: cleanEmail,
       updated_at: new Date().toISOString(),
       is_admin, is_director, is_accountant, is_staff,
-      perm_approve_b2b, perm_approve_b2c, perm_view_revenue, perm_view_staff,
+      perm_approve_b2b, perm_approve_b2c, perm_view_revenue, perm_view_staff, perm_manage_news,
       
 
       ChucDanh: ChucDanh || null,
