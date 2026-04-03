@@ -1740,7 +1740,7 @@ app.post("/api/b2b/forgot-password", async (req, res) => {
 
           <p style="font-size: 16px; color: #333; margin-bottom: 20px;">
             Xin chào <strong>${user.TenDoanhNghiep}</strong>,<br>
-            <span style="font-size: 14px; color: #666; font-style: italic;">Hello <strong>${user.TenDoanhNghiep}</strong>,</span>
+            <span style="font-size: 14px; color: #666; font-style: italic; font-weight: normal;">Hello <strong>${user.TenDoanhNghiep}</strong>,</span>
           </p>
           
           <p style="font-size: 15px; color: #333; margin-bottom: 2px;">
@@ -2125,7 +2125,7 @@ app.post("/api/User", async (req, res) => {
     const { 
       username, password, email, name, 
       is_admin, is_director, is_accountant, is_staff,
-      perm_approve_b2b, perm_approve_b2c, perm_view_revenue, perm_view_staff, perm_manage_news,
+      perm_approve_b2b, perm_approve_b2c, perm_view_revenue, perm_view_staff, perm_news_manage,
       ChucDanh, PhongBan, MaVung, SoDienThoai, NgayVaoLam, LoaiHopDong, CV
     } = req.body;
     
@@ -2189,7 +2189,7 @@ app.post("/api/User", async (req, res) => {
         perm_approve_b2c: perm_approve_b2c || false,
         perm_view_revenue: perm_view_revenue || false,
         perm_view_staff: perm_view_staff || false,
-        perm_manage_news: perm_manage_news || false,
+        perm_news_manage: perm_news_manage || false,
 
         ChucDanh, PhongBan, MaVung, SoDienThoai, NgayVaoLam, LoaiHopDong, CV
       }])
@@ -2233,7 +2233,7 @@ app.put("/api/User/:id", uploadImages.single("avatar"), async (req, res) => {
     let { 
       name, username, email, password, 
       is_admin, is_director, is_accountant, is_staff,
-      perm_approve_b2b, perm_approve_b2c, perm_view_revenue, perm_view_staff, perm_manage_news,
+      perm_approve_b2b, perm_approve_b2c, perm_view_revenue, perm_view_staff, perm_news_manage,
       ChucDanh, PhongBan, MaVung, SoDienThoai, NgayVaoLam, LoaiHopDong, CV
     } = req.body;
 
@@ -2247,7 +2247,7 @@ app.put("/api/User/:id", uploadImages.single("avatar"), async (req, res) => {
       email: cleanEmail,
       updated_at: new Date().toISOString(),
       is_admin, is_director, is_accountant, is_staff,
-      perm_approve_b2b, perm_approve_b2c, perm_view_revenue, perm_view_staff, perm_manage_news,
+      perm_approve_b2b, perm_approve_b2c, perm_view_revenue, perm_view_staff, perm_news_manage,
       
 
       ChucDanh: ChucDanh || null,
@@ -2766,9 +2766,7 @@ app.get("/api/b2b/services", async (req, res) => {
       if (!fixErr) item.ServiceID = fixedCode;
     }
 
-    const formattedData = data.map(item => {
-      const ngayHen = getAppointmentDateFromDetails(item.ChiTietDichVu);
-      return ({
+    const formattedData = data.map(item => ({
       ID: item.STT,
       DoanhNghiepID: item.DoanhNghiepID,
       SoDKKD: item.DoanhNghiep?.SoDKKD || "", 
@@ -2781,7 +2779,7 @@ app.get("/api/b2b/services", async (req, res) => {
       GoiDichVu: item.GoiDichVu || "", 
       YeuCauHoaDon: item.YeuCauHoaDon || "",     
       InvoiceUrl: item.InvoiceUrl || "",           
-      NgayHen: ngayHen,
+      NgayHen: item.NgayHen,
       NgayThucHien: item.NgayThucHien,
       NgayHoanThanh: item.NgayHoanThanh,
       DoanhThuTruocChietKhau: item.DoanhThuTruocChietKhau,
@@ -2794,9 +2792,8 @@ app.get("/api/b2b/services", async (req, res) => {
       NguoiPhuTrachId: item.NguoiPhuTrachId,      
       NguoiPhuTrach: item.NguoiPhuTrach || null, 
       NguoiPhuTrachName: item.NguoiPhuTrach ? item.NguoiPhuTrach.name : "",
-      TrangThai: item.TrangThai
-    });
-    });
+	  TrangThai: item.TrangThai
+    }));
 
     const parseCurrencyValue = (value) => {
       if (value === null || value === undefined || value === "") return 0;
@@ -3090,7 +3087,7 @@ app.post("/api/b2b/services", async (req, res) => {
         if (userId) {
             const { data: userCheck } = await supabase
                 .from("User")
-                .select("is_director, perm_approve_b2b, is_accountant, is_admin")
+                .select("is_admin, is_director, is_accountant, is_staff")
                 .eq("id", userId)
                 .single();
             
@@ -3098,7 +3095,7 @@ app.post("/api/b2b/services", async (req, res) => {
               userCheck?.is_admin ||
               userCheck?.is_director ||
               userCheck?.is_accountant ||
-              userCheck?.perm_approve_b2b
+              userCheck?.is_staff
             );
 
             if (!canApproveB2B) {
@@ -3266,7 +3263,7 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
       if (userId) {
          const { data: userCheck } = await supabase
             .from("User")
-            .select("is_admin, is_director, is_accountant, perm_approve_b2b")
+            .select("is_admin, is_director, is_accountant, is_staff")
             .eq("id", userId)
             .single();
 
@@ -3274,7 +3271,7 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
             userCheck?.is_admin ||
             userCheck?.is_director ||
             userCheck?.is_accountant ||
-            userCheck?.perm_approve_b2b
+            userCheck?.is_staff
           );
             
           if (!canApproveB2B) {
@@ -3426,18 +3423,19 @@ app.put("/api/b2b/services/update/:id", async (req, res) => {
       const currentCode = String(finalMaDichVu || "").trim();
       const currentCodeMatch = currentCode.match(/^([^-]+)-(\d{6})-([YNyn])-([0-9]{3})$/);
       const effectivePrefix = resolvedPrefix || (currentCodeMatch ? currentCodeMatch[1] : "");
-
-      if (effectivePrefix && currentCodeMatch) {
-        finalMaDichVu = `${effectivePrefix}-${expectedDateStr}-${expectedInvoiceCode}-${currentCodeMatch[4]}`;
-      } else {
-        finalMaDichVu = await generateServiceCode(
-          supabase,
-          LoaiDichVu || current.LoaiDichVu,
-          YeuCauHoaDon || current.YeuCauHoaDon,
-          DanhMuc || current.DanhMuc,
-          TenDichVu || current.TenDichVu,
-          targetDateForCode
-        );
+      if (effectivePrefix) {
+        if (currentCodeMatch) {
+          finalMaDichVu = `${effectivePrefix}-${expectedDateStr}-${expectedInvoiceCode}-${currentCodeMatch[4]}`;
+        } else {
+          finalMaDichVu = await generateServiceCode(
+            supabase,
+            LoaiDichVu || current.LoaiDichVu,
+            YeuCauHoaDon || current.YeuCauHoaDon,
+            DanhMuc || current.DanhMuc,
+            TenDichVu || current.TenDichVu,
+            targetDateForCode
+          );
+        }
       }
     }
 
@@ -3875,18 +3873,13 @@ app.set("socketio", io);
 // GET all Users
 app.get("/api/User", async (req, res) => {
   try {
-  
+    
     const { data: users, error: userError } = await supabase
       .from("User")
-      .select(`
-        id, name, username, email, avatar, updated_at,
-        is_admin, is_director, is_accountant, is_staff,
-        role,
-        perm_approve_b2b, perm_approve_b2c, perm_view_revenue, perm_view_staff,
-        ChucDanh, PhongBan, MaVung, SoDienThoai, NgayVaoLam, LoaiHopDong, CV
-      `)
+      .select("*")
       .order("id", { ascending: true });
-    
+
+    console.log("[DEBUG] users from supabase:", JSON.stringify(users, null, 2));
     if (userError) throw userError;
 
    
@@ -3943,8 +3936,6 @@ app.delete("/api/yeucau/:id", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-
-
 
 
 app.put("/api/yeucau/:id", async (req, res) => {
@@ -4087,7 +4078,11 @@ app.put("/api/yeucau/:id", async (req, res) => {
       nextDanhMuc,
       nextTenDichVu
     );
-    const expectedPrefix = expectedPrefixFromCatalog || resolveServiceCodePrefix(nextLoaiDichVu, nextDanhMuc, nextTenDichVu);
+    const expectedPrefix = expectedPrefixFromCatalog || resolveServiceCodePrefix(
+      nextLoaiDichVu,
+      nextDanhMuc,
+      nextTenDichVu
+    );
     const expectedDateStr = formatServiceCodeDate(nextNgayHen);
     const expectedInvoiceCode = ["yes", "có", "true", "y"].includes(String(nextInvoiceSource).toLowerCase()) ? "Y" : "N";
 
@@ -4121,7 +4116,7 @@ app.put("/api/yeucau/:id", async (req, res) => {
     // 5. Return updated data
     const { data } = await supabase
       .from("YeuCau")
-      .select(`*, ChiTietDichVu, NguoiPhuTrach:User!YeuCau_NguoiPhuTrachId_fkey(id, name)`)
+      .select(`*, ChiTietDichVu, NguoiPhuTrach:User!YeuCau_NguoiPhuTrachId_fkey(id, name, username, email)`)
       .eq("YeuCauID", id)
       .single();
 
@@ -4724,8 +4719,6 @@ app.post("/api/tuvan", async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-
-
 
 
 app.post("/api/yeucau", async (req, res) => {
